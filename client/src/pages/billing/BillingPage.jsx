@@ -920,8 +920,6 @@ export function BillingPage() {
         shop={activeShop}
       />
 
-      {productFormModalOpen && (
-      <Suspense fallback={null}>
       {quickAddOpen && (
         <Suspense fallback={null}>
           <QuickAddProductModal
@@ -939,6 +937,8 @@ export function BillingPage() {
         </Suspense>
       )}
 
+      {productFormModalOpen && (
+      <Suspense fallback={null}>
       <ProductFormModal
         isOpen={productFormModalOpen}
         initialBarcode={unregisteredBarcode}
