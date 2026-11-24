@@ -18,6 +18,7 @@ import {
   Eye
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import { ProductFormModal } from '../../components/ProductFormModal';
 import { ImportCsvModal } from '../../components/ImportCsvModal';
 const BarcodeLabelModal = lazy(() => import('../../components/BarcodeLabelModal').then(m => ({ default: m.BarcodeLabelModal })));
@@ -28,6 +29,8 @@ import { CategoryPills } from '../../components/ui/CategoryPills';
 import { formatCurrency } from '../../utils/formatters';
 
 export function ProductsPage() {
+  const { activeShop } = useAuth();
+  const canManage = activeShop?.role !== 'cashier';
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -162,6 +165,7 @@ export function ProductsPage() {
             <span>Bulk Labels</span>
           </Link>
 
+          {canManage && (
           <button
             onClick={() => setImportOpen(true)}
             className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all"
@@ -170,7 +174,9 @@ export function ProductsPage() {
             <Download className="h-4 w-4 text-slate-500" />
             <span>Import CSV</span>
           </button>
+          )}
 
+          {canManage && (
           <button
             onClick={() => {
               setEditingProduct(null);
@@ -181,6 +187,7 @@ export function ProductsPage() {
             <Plus className="h-4 w-4" />
             <span>Add Product</span>
           </button>
+          )}
         </div>
       </div>
 
@@ -313,6 +320,8 @@ export function ProductsPage() {
                     >
                       <Printer className="h-3.5 w-3.5" />
                     </button>
+                    {canManage && (
+                    <>
                     <button
                       onClick={() => {
                         setEditingProduct(p);
@@ -330,6 +339,8 @@ export function ProductsPage() {
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
+                    </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -388,6 +399,8 @@ export function ProductsPage() {
                       >
                         <Printer className="h-3.5 w-3.5" />
                       </button>
+                      {canManage && (
+                      <>
                       <button
                         onClick={() => {
                           setEditingProduct(p);
@@ -405,6 +418,8 @@ export function ProductsPage() {
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
+                      </>
+                      )}
                     </td>
                   </tr>
                 ))}

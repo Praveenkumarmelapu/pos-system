@@ -32,11 +32,11 @@ const NAV_SECTIONS = [
   {
     label: 'MAIN',
     items: [
-      { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['owner', 'manager'] },
       { to: '/pos', label: 'New Bill', icon: ShoppingCart, highlight: true },
       { to: '/products', label: 'Products', icon: Package },
       { to: '/categories', label: 'Categories', icon: Tag },
-      { to: '/inventory', label: 'Inventory', icon: Layers },
+      { to: '/inventory', label: 'Inventory', icon: Layers, roles: ['owner', 'manager'] },
       { to: '/reports', label: 'Sales & Returns', icon: ReceiptText },
     ],
   },
@@ -50,9 +50,9 @@ const NAV_SECTIONS = [
   {
     label: 'MANAGEMENT',
     items: [
-      { to: '/employees', label: 'Employees', icon: UserCheck },
+      { to: '/employees', label: 'Employees', icon: UserCheck, roles: ['owner'] },
       { to: '/hardware', label: 'Printers & Scanners', icon: Printer },
-      { to: '/settings', label: 'Shop Settings', icon: Settings },
+      { to: '/settings', label: 'Shop Settings', icon: Settings, roles: ['owner'] },
     ],
   },
 ];
@@ -95,6 +95,12 @@ function SidebarContent({ user, activeShop, isSuperAdmin, logout, cartCount, col
     ? [{ to: '/admin', label: 'Super Admin', icon: ShieldCheck }]
     : [];
 
+  const storedShop = (() => {
+    try { return JSON.parse(localStorage.getItem('pos_active_shop') || 'null'); } catch { return null; }
+  })();
+  const role = activeShop?.role || storedShop?.role || null;
+  const canSee = (item) => !item.roles || isSuperAdmin || (role && item.roles.includes(role));
+
   return (
     <div className="flex flex-col h-full bg-nav">
       {/* Brand Header */}
@@ -117,7 +123,10 @@ function SidebarContent({ user, activeShop, isSuperAdmin, logout, cartCount, col
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-5 no-scrollbar">
-        {NAV_SECTIONS.map((section) => (
+        {NAV_SECTIONS.map((section) => {
+          const visibleItems = section.items.filter(canSee);
+          if (visibleItems.length === 0) return null;
+          return (
           <div key={section.label}>
             {!collapsed && (
               <p className="px-3 pb-1.5 text-[10px] font-bold text-slate-600 uppercase tracking-widest">
@@ -125,12 +134,13 @@ function SidebarContent({ user, activeShop, isSuperAdmin, logout, cartCount, col
               </p>
             )}
             <div className="space-y-0.5">
-              {section.items.map((item) => (
+              {visibleItems.map((item) => (
                 <NavItem key={item.to + item.label} item={item} collapsed={collapsed} cartCount={cartCount} />
               ))}
             </div>
           </div>
-        ))}
+          );
+        })}
         {adminItems.length > 0 && (
           <div>
             {!collapsed && (
