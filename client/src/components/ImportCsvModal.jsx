@@ -107,7 +107,17 @@ export function ImportCsvModal({ isOpen, onClose, onImported }) {
     if (!file) return;
     setFileName(file.name);
     try {
-      const text = await file.text();
+      let text = null;
+      let lastErr = null;
+      for (let attempt = 0; attempt < 3 && text === null; attempt++) {
+        try {
+          text = await file.text();
+        } catch (readErr) {
+          lastErr = readErr;
+          await new Promise(r => setTimeout(r, 400));
+        }
+      }
+      if (text === null) throw lastErr;
       const { items: parsed, headerError } = rowsToItems(parseCsv(text));
       if (headerError) setParseError(headerError);
       else if (!parsed.length) setParseError('No usable rows found. Check that barcode, name and price are filled.');
