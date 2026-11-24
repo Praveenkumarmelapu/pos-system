@@ -122,7 +122,7 @@ export function ProductsPage() {
   };
 
   return (
-    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6 font-sans">
+    <div className="touch-controls p-4 sm:p-6 max-w-7xl mx-auto space-y-6 font-sans">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -326,7 +326,7 @@ export function ProductsPage() {
                 </div>
 
                 {/* Pricing & Actions */}
-                <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="text-sm font-extrabold text-slate-900">
                       {formatCurrency(p.sellingPrice)}
@@ -338,7 +338,7 @@ export function ProductsPage() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center justify-end gap-1">
                     <button
                       onClick={() => setLabelProduct(p)}
                       className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
