@@ -6,6 +6,8 @@ import { requireRole } from '../middleware/roleGuard.js';
 import { Shop } from '../models/Shop.js';
 import { User } from '../models/User.js';
 import { Membership } from '../models/Membership.js';
+import { PasswordResetRequest } from '../models/PasswordResetRequest.js';
+import { AuditLog } from '../models/AuditLog.js';
 import { sendError, sendSuccess } from '../utils/response.js';
 
 const router = Router();
@@ -68,6 +70,70 @@ router.post('/staff', async (req, res, next) => {
     if (user) await User.deleteOne({ _id: user._id }).catch(cleanupError => {
       console.error('Could not clean up an incomplete staff account:', cleanupError.message);
     });
+    next(error);
+  }
+});
+
+router.get('/password-reset-requests', async (req, res, next) => {
+  try {
+    const requests = await PasswordResetRequest.find({ shopId: req.tenant.shopId, status: 'pending' }).sort({ createdAt: -1 }).limit(50);
+    return sendSuccess(res, requests.map((item) => ({
+      id: item._id,
+      name: item.name,
+      email: item.email,
+      requestedAt: item.createdAt
+    })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Owner issues a new temporary password for a staff member.
+ * The plain temporary password is returned exactly once, for the owner to
+ * share with the staff member in person or on WhatsApp.
+ */
+router.post('/staff/:membershipId/reset-password', async (req, res, next) => {
+  try {
+    const membership = await Membership.findOne({ _id: req.params.membershipId, shopId: req.tenant.shopId });
+    if (!membership) {
+      return sendError(res, 'Staff member not found in this shop.', 404, 'STAFF_NOT_FOUND');
+    }
+    if (membership.userId.toString() === req.user._id.toString()) {
+      return sendError(res, 'Use Change Password for your own account.', 400, 'USE_CHANGE_PASSWORD');
+    }
+    const staffUser = await User.findById(membership.userId);
+    if (!staffUser) {
+      return sendError(res, 'The staff user account no longer exists.', 404, 'USER_NOT_FOUND');
+    }
+    if (staffUser.isSuperAdmin) {
+      return sendError(res, 'This account cannot be reset from here.', 403, 'FORBIDDEN_ACCOUNT');
+    }
+
+    const temporaryPassword = `Pos@${Math.floor(10000000 + Math.random() * 90000000)}`;
+    staffUser.passwordHash = await User.hashPassword(temporaryPassword);
+    await staffUser.save();
+
+    await PasswordResetRequest.updateMany(
+      { shopId: req.tenant.shopId, userId: staffUser._id, status: 'pending' },
+      { $set: { status: 'resolved', resolvedAt: new Date() } }
+    );
+
+    await AuditLog.create({
+      shopId: req.tenant.shopId,
+      userId: req.user._id,
+      action: 'staff:password_reset',
+      resourceType: 'user',
+      resourceId: staffUser._id.toString(),
+      details: { staffEmail: staffUser.email, role: membership.role }
+    }).catch((error) => console.error('Could not record the password reset audit event:', error.message));
+
+    return sendSuccess(res, {
+      staffName: staffUser.name,
+      staffEmail: staffUser.email,
+      temporaryPassword
+    }, 'Temporary password issued');
+  } catch (error) {
     next(error);
   }
 });

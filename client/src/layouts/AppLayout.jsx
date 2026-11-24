@@ -24,9 +24,11 @@ import {
   Bell,
   Search,
   Tag,
+  KeyRound,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
+import { ChangePasswordModal } from '../components/ChangePasswordModal';
 
 const NAV_SECTIONS = [
   {
@@ -189,6 +191,7 @@ export function AppLayout() {
   const { totals } = useCart();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -275,8 +278,18 @@ export function AppLayout() {
               <div className="h-2 w-2 rounded-full bg-green-500" />
               {user?.name}
             </div>
+            <button
+              onClick={() => setChangePasswordOpen(true)}
+              title="Change password"
+              aria-label="Change password"
+              className="p-2 rounded-lg text-txt-secondary hover:bg-surface-muted hover:text-txt transition-colors"
+            >
+              <KeyRound className="h-4 w-4" />
+            </button>
           </div>
         </header>
+
+        <ChangePasswordModal isOpen={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
 
         {/* Mobile Drawer */}
         {mobileMenuOpen && (

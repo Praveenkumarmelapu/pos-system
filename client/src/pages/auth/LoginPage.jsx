@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { api } from '../../services/api';
 import { Store, LogIn, AlertCircle, Eye, EyeOff, UserCheck, ArrowRight } from 'lucide-react';
 
 export function LoginPage() {
@@ -10,9 +11,27 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showForgotHelp, setShowForgotHelp] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState('');
 
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  const handleForgotSubmit = async (e) => {
+    e.preventDefault();
+    if (!forgotEmail.trim()) return;
+    setForgotLoading(true);
+    setForgotMessage('');
+    try {
+      const res = await api.post('/auth/forgot-password', { email: forgotEmail.trim() });
+      setForgotMessage(res.data?.message || 'Request submitted.');
+    } catch {
+      setForgotMessage('Could not submit the request. Check the email and try again.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -125,9 +144,23 @@ export function LoginPage() {
       </form>
 
       {showForgotHelp && (
-        <div className="mt-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-slate-700">
-          For security, passwords can only be reset by your shop owner (for staff) or by platform support (for shop owners).
-        </div>
+        <form onSubmit={handleForgotSubmit} className="mt-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-slate-700 space-y-2">
+          <p className="text-xs">Enter your account email. Staff get a temporary password from their shop owner (Staff page). Shop owners: contact platform support.</p>
+          <div className="flex gap-2">
+            <input
+              type="email"
+              required
+              value={forgotEmail}
+              onChange={(e) => setForgotEmail(e.target.value)}
+              className="input flex-1 !py-1.5 text-xs"
+              placeholder="you@yourstore.com"
+            />
+            <button type="submit" disabled={forgotLoading} className="btn-primary !py-1.5 px-3 text-xs">
+              {forgotLoading ? 'Sending...' : 'Request reset'}
+            </button>
+          </div>
+          {forgotMessage && <p className="text-xs font-semibold text-slate-800">{forgotMessage}</p>}
+        </form>
       )}
 
       {/* Demo Quick Access */}

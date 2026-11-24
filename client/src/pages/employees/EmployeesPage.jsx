@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Plus, KeyRound, Copy, Check, BellRing } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 
 export function EmployeesPage() {
-  const { activeShop } = useAuth();
+  const { activeShop, user } = useAuth();
   const isOwner = activeShop?.role === 'owner';
   const [employees, setEmployees] = useState([]);
+  const [resetRequests, setResetRequests] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -14,6 +15,15 @@ export function EmployeesPage() {
   const [role, setRole] = useState('cashier');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [resettingId, setResettingId] = useState(null);
+  const [tempPasswordInfo, setTempPasswordInfo] = useState(null);
+  const [copiedTemp, setCopiedTemp] = useState(false);
+
+  const loadResetRequests = useCallback((signal) => {
+    return api.get('/shop/password-reset-requests', { signal })
+      .then(res => setResetRequests(res.data.data || []))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!isOwner) return;
@@ -21,8 +31,33 @@ export function EmployeesPage() {
     api.get('/shop/staff', { signal: controller.signal })
       .then(res => setEmployees(res.data.data))
       .catch(() => { if (!controller.signal.aborted) setError('Could not load staff. Refresh to retry.'); });
+    loadResetRequests(controller.signal);
     return () => controller.abort();
-  }, [isOwner, activeShop?.shopId]);
+  }, [isOwner, activeShop?.shopId, loadResetRequests]);
+
+  const handleResetPassword = async (emp) => {
+    if (!window.confirm(`Issue a new temporary password for ${emp.name}? Their old password stops working immediately.`)) return;
+    setResettingId(emp.id);
+    setError('');
+    try {
+      const res = await api.post(`/shop/staff/${emp.id}/reset-password`);
+      setTempPasswordInfo(res.data.data);
+      setCopiedTemp(false);
+      loadResetRequests();
+    } catch (err) {
+      setError(err.response?.data?.error?.message || 'Could not reset the password.');
+    } finally {
+      setResettingId(null);
+    }
+  };
+
+  const copyTempPassword = async () => {
+    try {
+      await navigator.clipboard.writeText(tempPasswordInfo?.temporaryPassword || '');
+      setCopiedTemp(true);
+      setTimeout(() => setCopiedTemp(false), 2500);
+    } catch {}
+  };
 
   const handleAddEmployee = async (event) => {
     event.preventDefault();
@@ -64,6 +99,32 @@ export function EmployeesPage() {
 
       {!isOwner && <p className="text-sm text-slate-600">Only a store owner can manage staff.</p>}
       {error && !modalOpen && <p role="alert" className="text-sm text-red-700">{error}</p>}
+
+      {isOwner && resetRequests.length > 0 && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-2">
+          <div className="flex items-center gap-2 text-amber-800 text-xs font-bold">
+            <BellRing className="h-4 w-4" />
+            <span>Password reset requests ({resetRequests.length})</span>
+          </div>
+          {resetRequests.map((req) => {
+            const emp = employees.find(e => e.email === req.email);
+            return (
+              <div key={req.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-900 bg-white/60 rounded-xl px-3 py-2 border border-amber-100">
+                <span><span className="font-bold">{req.name}</span> ({req.email}) forgot their password.</span>
+                {emp && (
+                  <button
+                    onClick={() => handleResetPassword(emp)}
+                    disabled={resettingId === emp.id}
+                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white rounded-lg text-[11px] font-bold shrink-0"
+                  >
+                    {resettingId === emp.id ? 'Issuing...' : 'Issue Temporary Password'}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {employees.map(emp => (
           <div key={emp.id} className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-[0_2px_8px_rgba(0,0,0,0.02)] space-y-3">
@@ -99,9 +160,51 @@ export function EmployeesPage() {
                 ))}
               </div>
             </div>
+
+            {isOwner && emp.email !== user?.email && emp.role !== 'owner' && (
+              <div className="pt-2 border-t border-slate-100 flex justify-end">
+                <button
+                  onClick={() => handleResetPassword(emp)}
+                  disabled={resettingId === emp.id}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700 rounded-xl text-[11px] font-bold inline-flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                  <span>{resettingId === emp.id ? 'Issuing...' : 'Reset Password'}</span>
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>
+
+      {tempPasswordInfo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 font-sans select-none">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <h3 className="text-base font-bold text-slate-900">Temporary Password Issued</h3>
+            <p className="text-xs text-slate-500">
+              Share this with <span className="font-bold text-slate-800">{tempPasswordInfo.staffName}</span> in person or on WhatsApp. It is shown only once - their old password no longer works, and they can set a new one from the key icon after signing in.
+            </p>
+            <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+              <code className="flex-1 text-sm font-bold text-slate-900 tracking-wider">{tempPasswordInfo.temporaryPassword}</code>
+              <button
+                onClick={copyTempPassword}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold inline-flex items-center gap-1"
+              >
+                {copiedTemp ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                <span>{copiedTemp ? 'Copied' : 'Copy'}</span>
+              </button>
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={() => setTempPasswordInfo(null)}
+                className="px-5 py-2 border border-slate-300 text-slate-700 rounded-xl text-xs font-bold"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 font-sans select-none">

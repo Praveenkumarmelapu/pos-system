@@ -1,8 +1,10 @@
 import jwt from 'jsonwebtoken';
+import { z } from 'zod';
 import { User } from '../models/User.js';
 import { Shop } from '../models/Shop.js';
 import { Membership } from '../models/Membership.js';
 import { AuditLog } from '../models/AuditLog.js';
+import { PasswordResetRequest } from '../models/PasswordResetRequest.js';
 import { config } from '../config/env.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { registerShopSchema, loginSchema } from '../validators/auth.validator.js';
@@ -234,4 +236,62 @@ export async function getMe(req, res, next) {
 export async function logout(req, res) {
   res.clearCookie('pos_token');
   return sendSuccess(res, null, 'Logged out successfully');
+}
+
+export async function changePassword(req, res, next) {
+  try {
+    const { currentPassword, newPassword } = z.object({
+      currentPassword: z.string().min(1, 'Current password is required'),
+      newPassword: z.string().min(8, 'New password must be at least 8 characters').max(72)
+    }).parse(req.body);
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return sendError(res, 'User account not found.', 404, 'USER_NOT_FOUND');
+    }
+
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+      return sendError(res, 'The current password is incorrect.', 400, 'WRONG_CURRENT_PASSWORD');
+    }
+
+    if (currentPassword === newPassword) {
+      return sendError(res, 'The new password must be different from the current one.', 400, 'PASSWORD_UNCHANGED');
+    }
+
+    user.passwordHash = await User.hashPassword(newPassword);
+    await user.save();
+
+    return sendSuccess(res, null, 'Password changed successfully');
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Free forgot-password flow with no email service.
+ * Staff accounts: creates a pending reset request the shop owner actions from
+ * the Staff page by issuing a temporary password. Owner accounts: directed to
+ * platform support. Always answers generically so emails cannot be probed.
+ */
+export async function forgotPassword(req, res, next) {
+  try {
+    const { email } = z.object({ email: z.string().trim().toLowerCase().email() }).parse(req.body);
+
+    const user = await User.findOne({ email });
+    if (user) {
+      const staffMemberships = await Membership.find({ userId: user._id, status: 'active', role: { $ne: 'owner' } });
+      for (const membership of staffMemberships) {
+        await PasswordResetRequest.findOneAndUpdate(
+          { shopId: membership.shopId, userId: user._id, status: 'pending' },
+          { $setOnInsert: { shopId: membership.shopId, userId: user._id, name: user.name, email: user.email, status: 'pending' } },
+          { upsert: true, new: true }
+        );
+      }
+    }
+
+    return sendSuccess(res, null, 'If this email belongs to a staff account, the shop owner can now issue a temporary password from the Staff page. Shop owners: contact platform support to reset the owner password.');
+  } catch (err) {
+    next(err);
+  }
 }
