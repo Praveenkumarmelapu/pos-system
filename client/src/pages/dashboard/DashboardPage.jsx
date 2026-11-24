@@ -184,7 +184,6 @@ export function DashboardPage() {
             <RefreshCw className="h-4 w-4" /> Refresh
           </button>
           <Link to="/products/new" className="btn btn-secondary"><Plus className="h-4 w-4" /> Add product</Link>
-          <Link to="/pos" className="btn btn-primary"><ShoppingBag className="h-4 w-4" /> New bill</Link>
         </div>
       </header>
 
