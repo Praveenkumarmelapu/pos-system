@@ -43,33 +43,17 @@ const INDIAN_FMCG_CATALOG = {
 };
 
 /**
- * Extracts price in integer Paise from text or metadata
- */
-function parsePriceFromText(text) {
-  if (!text) return null;
-  // Match patterns like "Rs 10", "Rs. 20.00", "₹50", "MRP: 100"
-  const match = text.match(/(?:Rs\.?|₹|MRP\s*:?)\s*(\d+(?:\.\d+)?)/i);
-  if (match && match[1]) {
-    const num = parseFloat(match[1]);
-    if (!isNaN(num) && num > 0) {
-      return Math.round(num * 100);
-    }
-  }
-  return null;
-}
-
-/**
  * Smart Barcode Lookup Service
  * Tier 1: Current Shop Inventory (by shopId + barcode)
- * Tier 2: Platform Master Catalog Database
- * Tier 3: Built-in Indian FMCG catalog suggestions
- * Tier 4: External Catalog (Open Food Facts API) with text price extraction
+ * Tier 2: Built-in Indian FMCG catalog suggestions
+ * Tier 3: Shared Platform Master Catalog Database
+ * Tier 4: External free catalogs (Open Food Facts + UPCitemdb, queried in parallel)
  */
 export async function lookupBarcode(shopId, barcode) {
   const cleanBarcode = String(barcode).trim();
 
-  const alternatives = /^\d{12,14}$/.test(cleanBarcode)
-    ? [...new Set([cleanBarcode, cleanBarcode.replace(/^0+(?=\d{12}$)/, ''), cleanBarcode.padStart(13, '0'), cleanBarcode.padStart(14, '0')])]
+  const alternatives = /^\d{8,14}$/.test(cleanBarcode)
+    ? [...new Set([cleanBarcode, cleanBarcode.replace(/^0+(?=\d{12}$)/, ''), cleanBarcode.padStart(12, '0'), cleanBarcode.padStart(13, '0'), cleanBarcode.padStart(14, '0')])]
     : [cleanBarcode];
 
   // Tier 1: Check Active Shop Inventory
@@ -107,46 +91,7 @@ export async function lookupBarcode(shopId, barcode) {
     }
   }
 
-  // Tier 2: Check Platform Master Catalog Database
-  const masterProduct = await MasterProduct.findOne({ barcode: { $in: alternatives } });
-  if (masterProduct && (masterProduct.verified || !Object.hasOwn(INDIAN_FMCG_CATALOG, cleanBarcode))) {
-    const detectedMrp = masterProduct.verified ? masterProduct.mrp || 0 : 0;
-    const classification = await classifyProduct({
-      name: masterProduct.name,
-      brand: masterProduct.brand,
-      rawCategory: masterProduct.category,
-      shopId
-    });
-
-    return {
-      found: true,
-      source: 'master_catalog',
-      lookupStatus: detectedMrp ? 'complete' : 'partial',
-      matchType: detectedMrp ? 'complete' : 'partial',
-      currency: 'INR',
-      product: {
-        barcode: masterProduct.barcode,
-        name: masterProduct.name,
-        brand: masterProduct.brand,
-        category: classification.category,
-        subCategory: masterProduct.subCategory || classification.subCategory,
-        classificationStatus: classification.classificationStatus,
-        classificationConfidence: classification.confidence,
-        packSize: masterProduct.packSize,
-        unit: masterProduct.unit || 'pcs',
-        imageUrl: masterProduct.imageUrl || null,
-        mrp: detectedMrp || null,
-        sellingPrice: detectedMrp || null,
-        purchasePrice: null,
-        suggestedSellingPrice: detectedMrp || null,
-        suggestedPurchasePrice: null,
-        priceDetected: detectedMrp > 0,
-        isNewToShop: true
-      }
-    };
-  }
-
-  // Tier 3: Check Built-in Instant Indian FMCG Catalog
+  // Tier 2: Check Built-in Instant Indian FMCG Catalog
   const item = alternatives.map(code => Object.hasOwn(INDIAN_FMCG_CATALOG, code) && INDIAN_FMCG_CATALOG[code]).find(Boolean);
   if (item) {
     const classification = await classifyProduct({
@@ -173,19 +118,60 @@ export async function lookupBarcode(shopId, barcode) {
         packSize: item.packSize,
         unit: item.unit || 'pcs',
         imageUrl: item.imageUrl,
-        mrp: item.mrp,
-        sellingPrice: item.mrp,
+        description: '',
+        mrp: null,
+        sellingPrice: null,
         purchasePrice: null,
-        suggestedSellingPrice: item.mrp,
+        suggestedSellingPrice: null,
         suggestedPurchasePrice: null,
-        priceDetected: true,
+        priceDetected: false,
+        isNewToShop: true
+      }
+    };
+  }
+
+
+  // Tier 3: Check shared Platform Master Catalog Database
+  const masterProduct = await MasterProduct.findOne({ barcode: { $in: alternatives } });
+  if (masterProduct && (masterProduct.verified || !Object.hasOwn(INDIAN_FMCG_CATALOG, cleanBarcode))) {
+    const classification = await classifyProduct({
+      name: masterProduct.name,
+      brand: masterProduct.brand,
+      rawCategory: masterProduct.category,
+      shopId
+    });
+
+    return {
+      found: true,
+      source: 'master_catalog',
+      lookupStatus: masterProduct.name && masterProduct.brand && masterProduct.packSize ? 'complete' : 'partial',
+      matchType: masterProduct.name && masterProduct.brand && masterProduct.packSize ? 'complete' : 'partial',
+      currency: 'INR',
+      product: {
+        barcode: masterProduct.barcode,
+        name: masterProduct.name,
+        brand: masterProduct.brand,
+        category: classification.category,
+        subCategory: masterProduct.subCategory || classification.subCategory,
+        classificationStatus: classification.classificationStatus,
+        classificationConfidence: classification.confidence,
+        packSize: masterProduct.packSize,
+        unit: masterProduct.unit || 'pcs',
+        imageUrl: masterProduct.imageUrl || null,
+        description: masterProduct.description || '',
+        mrp: null,
+        sellingPrice: null,
+        purchasePrice: null,
+        suggestedSellingPrice: null,
+        suggestedPurchasePrice: null,
+        priceDetected: false,
         isNewToShop: true
       }
     };
   }
 
   let catalogUnavailable = false;
-  if (/^\d{8}$|^\d{12,14}$/.test(cleanBarcode)) try {
+  if (/^\d{8,14}$/.test(cleanBarcode)) try {
     const lookupCode = cleanBarcode.replace(/^0+(?=\d{12}$)/, '');
     // Query both free catalogs in parallel so a miss on one costs no extra time
     const [offSettled, upcSettled] = await Promise.allSettled([
@@ -211,7 +197,8 @@ export async function lookupBarcode(shopId, barcode) {
       ? upcSettled.value.data.items[0]
       : null;
 
-    if (!externalResponse && upcSettled.status !== 'fulfilled') catalogUnavailable = true;
+    const upcUnavailable = upcSettled.status === 'fulfilled' && upcSettled.value?.status === 429;
+    if (!externalResponse && (upcSettled.status !== 'fulfilled' || upcUnavailable)) catalogUnavailable = true;
 
     if (externalResponse?.data && externalResponse.data.status === 1 && externalResponse.data.product) {
       const p = externalResponse.data.product;
@@ -219,6 +206,7 @@ export async function lookupBarcode(shopId, barcode) {
       const brand = p.brands || p.brand_owner || '';
       const packSize = p.quantity || '';
       const imageUrl = p.image_front_url || p.image_url || null;
+      const description = String(p.generic_name || p.ingredients_text || '').trim().slice(0, 500);
 
       // Intelligent classification through master category engine
       const classification = await classifyProduct({
@@ -229,11 +217,6 @@ export async function lookupBarcode(shopId, barcode) {
         shopId
       });
 
-      // Accept structured prices only when the source identifies their currency.
-      const extractedMrp = String(p.currency || p.price_currency || '').toUpperCase() === 'INR'
-        ? parsePriceFromText(`₹${p.price ?? p.product_price ?? ''}`)
-        : parsePriceFromText(normalizedName) || parsePriceFromText(packSize) || parsePriceFromText(p.generic_name);
-
       const externalProduct = {
         barcode: cleanBarcode,
         name: normalizedName || `Item ${cleanBarcode}`,
@@ -243,49 +226,46 @@ export async function lookupBarcode(shopId, barcode) {
         classificationStatus: classification.classificationStatus,
         classificationConfidence: classification.confidence,
         packSize: packSize,
-        unit: 'pcs',
+        unit: /\bml\b/i.test(packSize) ? 'ml' : /\bl\b|litre|liter/i.test(packSize) ? 'l' : /\bkg\b/i.test(packSize) ? 'kg' : /\bg\b/i.test(packSize) ? 'g' : 'pcs',
         imageUrl: imageUrl,
-        mrp: extractedMrp,
-        sellingPrice: extractedMrp,
+        description,
+        mrp: null,
+        sellingPrice: null,
         purchasePrice: null,
-        suggestedSellingPrice: extractedMrp,
+        suggestedSellingPrice: null,
         suggestedPurchasePrice: null,
-        priceDetected: !!extractedMrp,
+        priceDetected: false,
         isNewToShop: true
       };
 
-      // Opportunistically cache in MasterProduct catalog
-      if (normalizedName && !extractedMrp) {
+      // Cache identity/specification/photo globally so every shop can reuse it.
+      if (normalizedName) {
         try {
-          await MasterProduct.create({
-            barcode: cleanBarcode,
-            name: externalProduct.name,
-            brand: externalProduct.brand,
-            category: externalProduct.category,
-            subCategory: externalProduct.subCategory,
-            packSize: externalProduct.packSize,
-            imageUrl: externalProduct.imageUrl,
-            mrp: extractedMrp || 0,
-            verified: false,
-            source: 'open_food_facts'
-          });
-        } catch {
-          // Ignore duplicate insert race condition
-        }
+          await MasterProduct.updateOne(
+            { barcode: cleanBarcode },
+            { $setOnInsert: {
+              barcode: cleanBarcode, name: externalProduct.name, brand: externalProduct.brand,
+              category: externalProduct.category, subCategory: externalProduct.subCategory,
+              packSize: externalProduct.packSize, description, unit: externalProduct.unit,
+              imageUrl: externalProduct.imageUrl || '', mrp: 0, verified: false, source: 'open_food_facts'
+            } },
+            { upsert: true }
+          );
+        } catch { /* another lookup may have inserted the same barcode */ }
       }
 
-      return {
+      if (normalizedName) return {
         found: true,
         source: 'external_catalog',
-        lookupStatus: normalizedName && extractedMrp ? 'complete' : 'partial',
-        matchType: normalizedName && extractedMrp ? 'complete' : 'partial',
+        lookupStatus: normalizedName && brand && packSize ? 'complete' : 'partial',
+        matchType: normalizedName && brand && packSize ? 'complete' : 'partial',
         currency: 'INR',
         product: externalProduct
       };
     }
 
     // Second free catalog: UPCitemdb trial (names/brands only, no reliable Indian prices)
-    if (upcItem && (upcItem.title || upcItem.brand)) {
+    if (upcItem && upcItem.title) {
       const upcName = String(upcItem.title || '').trim();
       const upcBrand = String(upcItem.brand || '').trim();
       const upcPackSize = String(upcItem.size || upcItem.weight || '').trim();
@@ -298,14 +278,15 @@ export async function lookupBarcode(shopId, barcode) {
 
       const upcProduct = {
         barcode: cleanBarcode,
-        name: upcName || `Item ${cleanBarcode}`,
+        name: upcName,
         brand: upcBrand,
         category: classification.category,
         subCategory: classification.subCategory,
         classificationStatus: classification.classificationStatus,
         classificationConfidence: classification.confidence,
         packSize: upcPackSize,
-        unit: 'pcs',
+        description: String(upcItem.description || '').trim().slice(0, 500),
+        unit: /\bml\b/i.test(upcPackSize) ? 'ml' : /\bl\b|litre|liter/i.test(upcPackSize) ? 'l' : /\bkg\b/i.test(upcPackSize) ? 'kg' : /\bg\b/i.test(upcPackSize) ? 'g' : 'pcs',
         imageUrl: Array.isArray(upcItem.images) && upcItem.images.length ? upcItem.images[0] : null,
         mrp: null,
         sellingPrice: null,
@@ -318,18 +299,17 @@ export async function lookupBarcode(shopId, barcode) {
 
       if (upcName) {
         try {
-          await MasterProduct.create({
-            barcode: cleanBarcode,
-            name: upcProduct.name,
-            brand: upcProduct.brand,
-            category: upcProduct.category,
-            subCategory: upcProduct.subCategory,
-            packSize: upcProduct.packSize,
-            imageUrl: upcProduct.imageUrl,
-            mrp: 0,
-            verified: false,
-            source: 'upcitemdb'
-          });
+          await MasterProduct.updateOne(
+            { barcode: cleanBarcode },
+            { $setOnInsert: {
+              barcode: cleanBarcode, name: upcProduct.name, brand: upcProduct.brand,
+              category: upcProduct.category, subCategory: upcProduct.subCategory,
+              packSize: upcProduct.packSize, description: upcProduct.description,
+              unit: upcProduct.unit, imageUrl: upcProduct.imageUrl || '',
+              mrp: 0, verified: false, source: 'upcitemdb'
+            } },
+            { upsert: true }
+          );
         } catch {
           // Ignore duplicate insert race condition
         }

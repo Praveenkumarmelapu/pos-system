@@ -32,6 +32,10 @@ const masterProductSchema = new mongoose.Schema(
       type: String,
       default: ''
     },
+    description: {
+      type: String,
+      default: ''
+    },
     unit: {
       type: String,
       default: 'pcs'
@@ -50,7 +54,7 @@ const masterProductSchema = new mongoose.Schema(
     },
     source: {
       type: String,
-      enum: ['system_seed', 'open_food_facts', 'verified_contribution'],
+      enum: ['system_seed', 'open_food_facts', 'upcitemdb', 'verified_contribution'],
       default: 'system_seed'
     }
   },

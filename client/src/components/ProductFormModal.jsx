@@ -206,17 +206,25 @@ export function ProductFormModal({
         setPackSize(p.packSize || '');
         setUnit(p.unit || 'pcs');
         setImageUrl(p.imageUrl || '');
+        setDescription(p.description || '');
 
-        setMrp(p.mrp > 0 ? String(p.mrp / 100) : '');
-        setIsVerifiedMrp(Boolean(p.verifiedMrp));
-        setSellingPrice(p.sellingPrice > 0 ? String(p.sellingPrice / 100) : '');
-        setPurchasePrice(p.purchasePrice > 0 ? String(p.purchasePrice / 100) : '');
+        // Product discovery never supplies prices. The user enters prices from the package.
+        setMrp('');
+        setSellingPrice('');
+        setPurchasePrice('');
+        setIsVerifiedMrp(false);
         setStockQuantity('10');
-        setPriceAutoDetected(p.sellingPrice > 0);
-        setDetectedPriceSource(source === 'shop_inventory' ? 'Shop inventory' : 'Product catalog');
+        setPriceAutoDetected(false);
+        setDetectedPriceSource('');
         setLookupSource(source === 'built_in_catalog' ? 'master_catalog' : source);
         setLookupStatus(match.lookupStatus);
       } else {
+        setName('');
+        setBrand('');
+        setDescription('');
+        setImageUrl('');
+        setPackSize('');
+        setUnit('pcs');
         setMrp('');
         setSellingPrice('');
         setPurchasePrice('');
@@ -224,7 +232,7 @@ export function ProductFormModal({
         setLookupSource('none');
         setLookupStatus(match.lookupStatus);
         if (match.lookupStatus === 'unavailable') {
-          setErrorMessage('The external catalog is unavailable. Enter product details manually below.');
+          setErrorMessage('Online catalogs are unavailable right now. Barcode kept; enter product details manually.');
         }
       }
     } catch (err) {
@@ -425,7 +433,7 @@ export function ProductFormModal({
                 )}
                 {lookupSource === 'none' && (
                   <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200 font-medium">
-                    New Product Registered — Enter details below
+                    {lookupStatus === 'unavailable' ? 'Catalogs unavailable. Barcode kept; enter details below.' : 'Not found in catalogs. Barcode kept; enter details below.'}
                   </span>
                 )}
               </div>

@@ -173,7 +173,16 @@ export function AddProductPage() {
       setLookupSource(match.lookupStatus === 'unavailable' ? 'unavailable' : match.source);
 
       if (!match.found) {
-        showToast('New barcode. Type the product name and price from the package.', 'info');
+        setName('');
+        setBrand('');
+        setDescription('');
+        setImageUrl('');
+        setPackSize('');
+        setUnit('pcs');
+        setMrp('');
+        setSellingPrice('');
+        setPurchasePrice('');
+        showToast(match.lookupStatus === 'unavailable' ? 'Online catalogs unavailable. Barcode kept; enter details manually.' : 'Not found in catalogs. Barcode kept; enter product details manually.', 'info');
         setTimeout(() => nameInputRef.current?.focus(), 50);
         return;
       }
@@ -189,6 +198,7 @@ export function AddProductPage() {
       setPackSize(p.packSize || '');
       setUnit(p.unit || 'pcs');
       setImageUrl(p.imageUrl || '');
+      setDescription(p.description || '');
 
       // Intelligent categorization result
       if (p.category) {
@@ -201,21 +211,11 @@ export function AddProductPage() {
         setClassificationStatus(p.classificationStatus || 'auto_assigned');
       }
 
-      // MRP & Pricing
-      if (p.mrp > 0) {
-        setMrp(String(p.mrp / 100));
-        setIsVerifiedMrp(Boolean(p.verifiedMrp));
-      } else {
-        setMrp('');
-        setIsVerifiedMrp(false);
-      }
-
-      if (p.sellingPrice > 0) {
-        setSellingPrice(String(p.sellingPrice / 100));
-      }
-      if (p.purchasePrice > 0) {
-        setPurchasePrice(String(p.purchasePrice / 100));
-      }
+      // Product lookup fills identity/specification/photo only. Pricing is always manual.
+      setMrp('');
+      setSellingPrice('');
+      setPurchasePrice('');
+      setIsVerifiedMrp(false);
 
       showToast(`Product identified: ${p.name}`);
     } catch (err) {
@@ -503,7 +503,7 @@ export function AddProductPage() {
               className={`rounded-xl p-3 text-xs flex items-center gap-2.5 ${
                 existingProduct
                   ? 'bg-amber-50 text-amber-900 border border-amber-200'
-                  : lookupSource === 'unavailable'
+                  : ['unavailable', 'none'].includes(lookupSource)
                   ? 'bg-amber-50 text-amber-800 border border-amber-200'
                   : 'bg-emerald-50 text-emerald-900 border border-emerald-200'
               }`}
@@ -518,10 +518,10 @@ export function AddProductPage() {
                     </Link>
                   </span>
                 </>
-              ) : lookupSource === 'none' ? (
+              ) : ['none', 'unavailable'].includes(lookupSource) ? (
                 <>
                   <Info className="h-4 w-4 text-slate-500 shrink-0" />
-                  <span>New barcode registered. Enter product details below.</span>
+                  <span>{lookupSource === 'unavailable' ? 'Online catalogs unavailable. Barcode kept; enter product details manually.' : 'Not found in available catalogs. Barcode kept; enter product details manually.'}</span>
                 </>
               ) : (
                 <>

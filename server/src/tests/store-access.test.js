@@ -52,12 +52,14 @@ describe('Store access and barcode onboarding', () => {
     await api.get('/api/v1/products').auth(ownerToken, { type: 'bearer' }).expect(200);
   });
 
-  it('fills catalog prices in paise, reuses the shop price, and preserves unknown barcodes', async () => {
+  it('keeps catalog suggestions price-free, reuses shop prices, and preserves unknown barcodes', async () => {
     const barcode = '748528227955';
     const lookup = code => api.get(`/api/v1/barcodes/lookup/${code}`).auth(ownerToken, { type: 'bearer' });
     await MasterProduct.updateOne({ barcode }, { name: 'Catalog Soap', mrp: 4250 }, { upsert: true });
     const catalog = await lookup(`0${barcode}`).expect(200);
-    expect(catalog.body.data.product).toMatchObject({ name: 'Catalog Soap', sellingPrice: 4250, purchasePrice: null });
+    expect(catalog.body.data.product).toMatchObject({ name: 'Catalog Soap', mrp: null, sellingPrice: null, purchasePrice: null, priceDetected: false });
+    const builtIn = await lookup('8901058852234').expect(200);
+    expect(builtIn.body.data.product).toMatchObject({ name: 'Maggi 2-Minute Masala Noodles 70g', mrp: null, sellingPrice: null, purchasePrice: null, priceDetected: false });
     await api.post('/api/v1/products').auth(ownerToken, { type: 'bearer' })
       .send({ barcode, name: 'Shop Soap', sellingPrice: 40.50, purchasePrice: 20 }).expect(201);
     const stored = await lookup(`0${barcode}`).expect(200);
