@@ -4,9 +4,13 @@ import { api } from '../services/api';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [activeShop, setActiveShop] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Start from the cached session so the app renders instantly; /auth/me revalidates in the background.
+  const cached = (key) => {
+    try { return localStorage.getItem('pos_token') ? JSON.parse(localStorage.getItem(key)) : null; } catch { return null; }
+  };
+  const [user, setUser] = useState(() => cached('pos_user'));
+  const [activeShop, setActiveShop] = useState(() => cached('pos_active_shop'));
+  const [loading, setLoading] = useState(() => !(cached('pos_user') && cached('pos_active_shop')) && !!localStorage.getItem('pos_token'));
 
   const refreshSession = useCallback(async (signal) => {
     if (!localStorage.getItem('pos_token')) return;

@@ -164,7 +164,8 @@ export function BillingPage() {
 
   useEffect(() => {
     loadProducts();
-    if (barcodeInputRef.current) {
+    // Only auto-focus on desktops; on phones it pops the keyboard.
+    if (barcodeInputRef.current && window.matchMedia?.('(pointer: fine)').matches) {
       barcodeInputRef.current.focus();
     }
   }, []);

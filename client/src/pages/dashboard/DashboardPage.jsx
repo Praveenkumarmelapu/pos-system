@@ -19,7 +19,7 @@ import {
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
-import { SalesChart } from '../../components/ui/SalesChart';
+const SalesChart = React.lazy(() => import('../../components/ui/SalesChart').then(m => ({ default: m.SalesChart })));
 import { formatCurrency } from '../../utils/formatters';
 
 // Clean Commercial KPI Card
@@ -268,7 +268,7 @@ export function DashboardPage() {
         </div>
 
         {/* Upgraded Multi-Style SalesChart */}
-        <SalesChart data={trends} />
+        <React.Suspense fallback={<div className="h-64 animate-pulse rounded-xl bg-slate-100" />}><SalesChart data={trends} /></React.Suspense>
       </div>
 
       {/* ========================================================================= */}
