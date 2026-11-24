@@ -1,4 +1,5 @@
 // Vercel serverless entry: all /api/* requests are rewritten here.
+import mongoose from 'mongoose';
 import app from '../server/src/app.js';
 import { connectDB } from '../server/src/config/db.js';
 import { initializeMasterCategories } from '../server/src/services/category.service.js';
@@ -8,7 +9,12 @@ let ready = false;
 async function init() {
   if (ready) return;
   await connectDB();
-  await initializeMasterCategories();
+  // Master categories are pre-seeded; only run the slow full init on an empty database.
+  // (It is ~100 sequential writes and would exceed the function timeout on cold start.)
+  const count = await mongoose.connection.db.collection('categories').estimatedDocumentCount();
+  if (count === 0) {
+    await initializeMasterCategories();
+  }
   ready = true;
 }
 
