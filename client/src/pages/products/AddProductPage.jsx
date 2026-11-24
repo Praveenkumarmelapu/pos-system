@@ -1000,11 +1000,18 @@ export function AddProductPage() {
 
       {/* Camera Barcode Scanner Modal */}
       {cameraModalOpen && (
-        <Suspense fallback={null}>
+        <Suspense fallback={
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+            <div className="bg-slate-900 text-white rounded-2xl px-6 py-5 flex items-center gap-3 border border-slate-800">
+              <Loader2 className="h-5 w-5 animate-spin text-blue-400" />
+              <span className="text-sm">Starting camera scanner...</span>
+            </div>
+          </div>
+        }>
         <CameraScannerModal
           isOpen={cameraModalOpen}
           onClose={() => setCameraModalOpen(false)}
-          onScan={(code) => {
+          onScanSuccess={(code) => {
             setCameraModalOpen(false);
             handleBarcodeLookup(code);
           }}

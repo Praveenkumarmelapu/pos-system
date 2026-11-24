@@ -51,8 +51,8 @@ export function CameraScannerModal({ isOpen, onClose, onScanSuccess }) {
           scanned = true;
           scanControls.stop();
           playBeep();
-          callbacks.current.onScanSuccess(result.getText());
-          callbacks.current.onClose();
+          callbacks.current.onScanSuccess?.(result.getText());
+          callbacks.current.onClose?.();
         });
         if (cancelled || scanned) {
           controls.stop();

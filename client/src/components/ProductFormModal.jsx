@@ -726,7 +726,7 @@ export function ProductFormModal({
         <CameraScannerModal
           isOpen={cameraScanOpen}
           onClose={() => setCameraScanOpen(false)}
-          onScan={(code) => {
+          onScanSuccess={(code) => {
             setCameraScanOpen(false);
             setBarcode(code);
             handleLookup(code);
