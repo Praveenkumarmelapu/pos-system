@@ -11,10 +11,12 @@ import {
   User,
   ShoppingBag,
   CreditCard,
-  MessageCircle
+  MessageCircle,
+  RotateCcw
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { ReceiptModal } from '../../components/ReceiptModal';
+import { ReturnModal } from '../../components/ReturnModal';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { WhatsAppIcon } from '../../components/ui/WhatsAppIcon';
@@ -26,6 +28,8 @@ export function ReportsPage() {
   const [selectedPayment, setSelectedPayment] = useState('all');
   const [selectedSale, setSelectedSale] = useState(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [returnSale, setReturnSale] = useState(null);
+  const [returnOpen, setReturnOpen] = useState(false);
   const { activeShop } = useAuth();
 
   const loadSales = async () => {
@@ -49,6 +53,21 @@ export function ReportsPage() {
   const handlePrintReceipt = (sale) => {
     setSelectedSale(sale);
     setReceiptOpen(true);
+  };
+
+  const handleReturn = (sale) => {
+    setReturnSale(sale);
+    setReturnOpen(true);
+  };
+
+  const statusBadge = (s) => {
+    if (s.status === 'returned') {
+      return <span className="ml-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">Returned</span>;
+    }
+    if (s.status === 'partially_returned') {
+      return <span className="ml-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200">Part Return</span>;
+    }
+    return null;
   };
 
   const filteredSales = sales.filter((s) => {
@@ -141,6 +160,7 @@ export function ReportsPage() {
                   <tr key={s._id} className="hover:bg-slate-50/70 transition-colors">
                     <td className="px-5 py-3.5 font-mono font-bold text-blue-600 text-sm">
                       {s.invoiceNumber}
+                      {statusBadge(s)}
                     </td>
 
                     <td className="px-5 py-3.5 text-slate-600 font-medium">
@@ -167,6 +187,9 @@ export function ReportsPage() {
 
                     <td className="px-5 py-3.5 text-right font-extrabold text-sm text-slate-900">
                       {formatCurrency(s.grandTotal)}
+                      {s.refundTotal > 0 && (
+                        <div className="text-[10px] font-semibold text-rose-600">-{formatCurrency(s.refundTotal)} refunded</div>
+                      )}
                     </td>
 
                     <td className="px-5 py-3.5 text-right">
@@ -186,6 +209,16 @@ export function ReportsPage() {
                           <Printer className="h-3.5 w-3.5" />
                           <span>Print Bill</span>
                         </button>
+                        {s.status !== 'returned' && s.status !== 'cancelled' && (
+                          <button
+                            onClick={() => handleReturn(s)}
+                            className="px-3 py-1.5 bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-700 rounded-xl text-[11px] font-bold inline-flex items-center gap-1.5 transition-colors shadow-xs"
+                            title="Return / refund items from this bill"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            <span>Return</span>
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -201,6 +234,13 @@ export function ReportsPage() {
         onClose={() => setReceiptOpen(false)}
         sale={selectedSale}
         shop={activeShop}
+      />
+      <ReturnModal
+        isOpen={returnOpen}
+        onClose={() => setReturnOpen(false)}
+        sale={returnSale}
+        shop={activeShop}
+        onReturned={() => loadSales()}
       />
     </div>
   );

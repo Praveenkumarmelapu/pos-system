@@ -145,9 +145,36 @@ const saleSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['completed', 'returned', 'cancelled'],
+      enum: ['completed', 'partially_returned', 'returned', 'cancelled'],
       default: 'completed',
       index: true
+    },
+    returns: {
+      type: [
+        {
+          productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+          barcode: { type: String, required: true },
+          name: { type: String, required: true },
+          quantity: { type: Number, required: true, min: 0.001 },
+          unitPrice: { type: Number, required: true },
+          taxAmount: { type: Number, default: 0 },
+          refundAmount: { type: Number, required: true },
+          refundMethod: {
+            type: String,
+            enum: ['cash', 'upi', 'card', 'khata_adjust'],
+            default: 'cash'
+          },
+          reason: { type: String, default: '' },
+          returnedAt: { type: Date, default: Date.now },
+          returnedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+          returnedByName: { type: String, required: true }
+        }
+      ],
+      default: []
+    },
+    refundTotal: {
+      type: Number,
+      default: 0 // In Paise: total refunded across all returns
     },
     saleDate: {
       type: Date,

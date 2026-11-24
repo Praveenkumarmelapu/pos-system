@@ -32,7 +32,7 @@ function getStartOfMonthIST() {
  * Helper to compute detailed payment breakdown (Cash, UPI, Credit, Card) for a given time window
  */
 export async function getPaymentBreakdownData(shopId, startDate, endDate) {
-  const match = { shopId, status: 'completed' };
+  const match = { shopId, status: { $in: ['completed', 'partially_returned'] } };
   if (startDate || endDate) {
     match.saleDate = {};
     if (startDate) match.saleDate.$gte = startDate;
@@ -86,7 +86,7 @@ export async function getPaymentBreakdownData(shopId, startDate, endDate) {
     {
       $group: {
         _id: null,
-        totalSales: { $sum: '$grandTotal' },
+        totalSales: { $sum: { $subtract: ['$grandTotal', { $ifNull: ['$refundTotal', 0] }] } },
         totalBills: { $sum: 1 },
         cashTotal: { $sum: '$cashPart' },
         upiTotal: { $sum: '$upiPart' },
@@ -373,7 +373,7 @@ export async function getSalesTrends(req, res, next) {
               timezone: '+05:30' // Asia/Kolkata
             }
           },
-          totalSales: { $sum: '$grandTotal' },
+          totalSales: { $sum: { $subtract: ['$grandTotal', { $ifNull: ['$refundTotal', 0] }] } },
           billsCount: { $sum: 1 }
         }
       },

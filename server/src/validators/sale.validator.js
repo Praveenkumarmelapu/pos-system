@@ -28,3 +28,14 @@ export const createSaleSchema = z.object({
   customerPhone: z.string().nullable().optional(),
   notes: z.string().optional().default('')
 });
+
+export const createReturnSchema = z.object({
+  items: z.array(
+    z.object({
+      productId: z.string().min(1, 'Product ID is required'),
+      quantity: z.number().positive('Return quantity must be greater than 0')
+    })
+  ).min(1, 'Select at least one item to return'),
+  refundMethod: z.enum(['cash', 'upi', 'card', 'khata_adjust']).default('cash'),
+  reason: z.string().trim().max(200).optional().default('')
+});

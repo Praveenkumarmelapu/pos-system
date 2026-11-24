@@ -3,9 +3,10 @@ import { Product } from '../models/Product.js';
 import { StockMovement } from '../models/StockMovement.js';
 import { Customer } from '../models/Customer.js';
 import { CustomerLedgerEntry } from '../models/CustomerLedgerEntry.js';
+import { AuditLog } from '../models/AuditLog.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { rupeesToPaise } from '../utils/money.js';
-import { createSaleSchema } from '../validators/sale.validator.js';
+import { createSaleSchema, createReturnSchema } from '../validators/sale.validator.js';
 
 function formatInvoiceNumber(count) {
   const now = new Date();
@@ -303,6 +304,196 @@ export async function getSaleById(req, res, next) {
     }
 
     return sendSuccess(res, sale);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Process a return/refund against an existing bill.
+ * - Restores stock for returned quantities and records stock movements
+ * - Refund is proportional to each line's billed total (discount + GST included)
+ * - 'khata_adjust' reduces the customer's outstanding udhaar instead of a cash refund
+ * - Marks the bill 'partially_returned' or 'returned' when every item is back
+ */
+export async function returnSaleItems(req, res, next) {
+  try {
+    const shopId = req.tenant.shopId;
+    const { id } = req.params;
+    const validated = createReturnSchema.parse(req.body);
+
+    const sale = await Sale.findOne({ _id: id, shopId });
+    if (!sale) {
+      return sendError(res, 'Sale invoice not found', 404, 'SALE_NOT_FOUND');
+    }
+    if (sale.status === 'cancelled') {
+      return sendError(res, 'This bill was cancelled and cannot be returned.', 400, 'SALE_CANCELLED');
+    }
+    if (sale.status === 'returned') {
+      return sendError(res, 'This bill has already been fully returned.', 400, 'ALREADY_RETURNED');
+    }
+
+    // Quantities already returned per product
+    const returnedSoFar = new Map();
+    (sale.returns || []).forEach((entry) => {
+      const key = entry.productId.toString();
+      returnedSoFar.set(key, (returnedSoFar.get(key) || 0) + entry.quantity);
+    });
+
+    // Merge duplicate product lines in the request
+    const requestMap = new Map();
+    for (const item of validated.items) {
+      requestMap.set(item.productId, (requestMap.get(item.productId) || 0) + item.quantity);
+    }
+
+    const dbProducts = await Product.find({ _id: { $in: [...requestMap.keys()] }, shopId });
+    const productMap = new Map();
+    dbProducts.forEach((p) => productMap.set(p._id.toString(), p));
+
+    let refundSubtotal = 0;
+    let refundTax = 0;
+    let refundTotal = 0;
+    const returnEntries = [];
+    const stockBulkOps = [];
+    const movementRecords = [];
+
+    for (const [productId, qty] of requestMap) {
+      const line = sale.items.find((i) => i.productId.toString() === productId);
+      if (!line) {
+        return sendError(res, 'One or more selected items are not part of this bill.', 400, 'ITEM_NOT_IN_SALE');
+      }
+      const alreadyReturned = returnedSoFar.get(productId) || 0;
+      const remainingQty = Math.round((line.quantity - alreadyReturned) * 1000) / 1000;
+      if (qty > remainingQty + 1e-9) {
+        return sendError(
+          res,
+          `Only ${remainingQty} qty of '${line.name}' can still be returned from this bill.`,
+          400,
+          'RETURN_QTY_EXCEEDS'
+        );
+      }
+
+      // Proportional refund: lineTotal already includes item discount and GST
+      const lineRefund = Math.round((line.lineTotal * qty) / line.quantity);
+      const lineTax = Math.round((line.taxAmount * qty) / line.quantity);
+      refundTotal += lineRefund;
+      refundTax += lineTax;
+      refundSubtotal += lineRefund - lineTax;
+
+      returnEntries.push({
+        productId: line.productId,
+        barcode: line.barcode,
+        name: line.name,
+        quantity: qty,
+        unitPrice: line.unitPrice,
+        taxAmount: lineTax,
+        refundAmount: lineRefund,
+        refundMethod: validated.refundMethod,
+        reason: validated.reason || '',
+        returnedAt: new Date(),
+        returnedBy: req.user._id,
+        returnedByName: req.user.name
+      });
+
+      const product = productMap.get(productId);
+      if (product) {
+        stockBulkOps.push({
+          updateOne: {
+            filter: { _id: product._id, shopId },
+            update: { $inc: { stockQuantity: qty } }
+          }
+        });
+        movementRecords.push({
+          shopId,
+          productId: product._id,
+          barcode: line.barcode,
+          type: 'return',
+          quantityDelta: qty,
+          previousStock: product.stockQuantity,
+          newStock: Math.round((product.stockQuantity + qty) * 1000) / 1000,
+          referenceId: sale.invoiceNumber,
+          reason: `Return against ${sale.invoiceNumber}${validated.reason ? ` - ${validated.reason}` : ''}`,
+          performedBy: req.user._id
+        });
+      }
+    }
+
+    // Khata handling: reduce outstanding udhaar instead of handing cash back
+    let khataAdjusted = 0;
+    if (validated.refundMethod === 'khata_adjust') {
+      if (!sale.customerId) {
+        return sendError(res, 'This bill has no registered customer, so the refund cannot go to Khata. Choose cash/UPI/card instead.', 400, 'NO_CUSTOMER_FOR_KHATA_ADJUST');
+      }
+      const customer = await Customer.findOne({ _id: sale.customerId, shopId });
+      if (!customer) {
+        return sendError(res, 'The customer on this bill no longer exists.', 404, 'CUSTOMER_NOT_FOUND');
+      }
+      khataAdjusted = Math.min(refundTotal, Math.max(0, customer.outstandingUdhaar));
+      if (khataAdjusted > 0) {
+        const updatedCustomer = await Customer.findOneAndUpdate(
+          { _id: customer._id, shopId },
+          { $inc: { outstandingUdhaar: -khataAdjusted } },
+          { new: true }
+        );
+        await CustomerLedgerEntry.create({
+          shopId,
+          customerId: customer._id,
+          entryType: 'sale_return',
+          amount: khataAdjusted,
+          debit: 0,
+          credit: khataAdjusted,
+          runningBalance: updatedCustomer.outstandingUdhaar,
+          referenceId: sale.invoiceNumber,
+          saleId: sale._id,
+          paymentMethod: 'return',
+          notes: `Return against Bill #${sale.invoiceNumber} (Refund: Rs ${(refundTotal / 100).toFixed(2)}, Khata reduced: Rs ${(khataAdjusted / 100).toFixed(2)})`,
+          performedBy: req.user._id,
+          performedByName: req.user.name
+        });
+      }
+    }
+
+    // Update the sale record
+    sale.returns = [...(sale.returns || []), ...returnEntries];
+    sale.refundTotal = (sale.refundTotal || 0) + refundTotal;
+    const fullyReturned = sale.items.every((line) => {
+      const key = line.productId.toString();
+      const totalReturned = (returnedSoFar.get(key) || 0) + (requestMap.get(key) || 0);
+      return totalReturned >= line.quantity - 1e-9;
+    });
+    sale.status = fullyReturned ? 'returned' : 'partially_returned';
+    await sale.save();
+
+    if (stockBulkOps.length > 0) await Product.bulkWrite(stockBulkOps);
+    if (movementRecords.length > 0) await StockMovement.insertMany(movementRecords);
+
+    await AuditLog.create({
+      shopId,
+      userId: req.user._id,
+      action: 'sale:returned',
+      resourceType: 'sale',
+      resourceId: sale._id.toString(),
+      details: {
+        invoiceNumber: sale.invoiceNumber,
+        refundTotal,
+        refundMethod: validated.refundMethod,
+        khataAdjusted,
+        itemCount: returnEntries.length,
+        status: sale.status
+      }
+    }).catch((error) => console.error('Could not record the sale return audit event:', error.message));
+
+    return sendSuccess(res, {
+      sale,
+      refund: {
+        subtotal: refundSubtotal,
+        tax: refundTax,
+        total: refundTotal,
+        method: validated.refundMethod,
+        khataAdjusted
+      },
+      returnedItems: returnEntries
+    }, 'Return processed successfully', 201);
   } catch (err) {
     next(err);
   }
