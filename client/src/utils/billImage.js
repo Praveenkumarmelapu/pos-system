@@ -259,6 +259,16 @@ function downloadBlob(blob, fileName) {
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
+/** Download the generated bill PNG without invoking the Web Share sheet. */
+export async function downloadBillImage({ sale, shop }) {
+  const blob = await generateBillImageBlob({ sale, shop });
+  downloadBlob(blob, `Bill-${sale.invoiceNumber || 'receipt'}.png`);
+}
+
+export function getBillImageCaption({ sale, shop }) {
+  return `Bill #${sale?.invoiceNumber || ''} - ${shop?.name || 'Retail Store'} - Total ${money(sale?.grandTotal)}. The bill image is saved on this device, please attach it here.`;
+}
+
 /**
  * Share the bill as an image.
  * - Android Chrome: Web Share API hands the PNG to WhatsApp as a photo.

@@ -4,10 +4,11 @@ import { formatCurrency, formatDate } from '../utils/formatters';
 import {
   formatBillWhatsAppMessage,
   openWhatsAppShare,
+  getWhatsAppShareUrl,
   copyToClipboard,
   cleanPhoneNumber
 } from '../utils/whatsapp';
-import { shareBillAsImage } from '../utils/billImage';
+import { downloadBillImage, getBillImageCaption, shareBillAsImage } from '../utils/billImage';
 import { WhatsAppIcon } from './ui/WhatsAppIcon';
 
 export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false }) {
@@ -48,28 +49,47 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
     }
   };
 
-  const handleShareWhatsApp = async () => {
+  const handleShareImageOptions = async () => {
     setPhoneError('');
     setSharing(true);
     try {
       const result = await shareBillAsImage({
         sale,
         shop,
-        phone: whatsappPhone,
+        phone: '',
         openWhatsAppShare
       });
       if (result.cancelled) return;
-      if (result.method === 'share') {
-        setShareNote(`Bill image ready - pick WhatsApp and the customer to send it.`);
-      } else {
-        setShareNote(`Bill image downloaded - WhatsApp opened, attach the downloaded image there.`);
-      }
+      setShareNote('Bill image ready in the share sheet. Choose WhatsApp and then the customer.');
       setShareSuccess(true);
       setTimeout(() => setShareSuccess(false), 6000);
     } catch (err) {
-      console.error('Bill image share failed, falling back to text:', err);
-      openWhatsAppShare(whatsappPhone, billMessage);
-      setShareNote('Image share failed on this device - opened WhatsApp with the text bill instead.');
+      console.error('Bill image share failed:', err);
+      setShareNote('Could not prepare the bill image on this device.');
+      setShareSuccess(true);
+      setTimeout(() => setShareSuccess(false), 6000);
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const handleShareWhatsApp = async () => {
+    setPhoneError('');
+    if (!cleanedPhone) {
+      setPhoneError('Enter a customer WhatsApp number to open their chat directly. Use Share image options for the contact picker.');
+      return;
+    }
+    setSharing(true);
+    const whatsappUrl = getWhatsAppShareUrl(cleanedPhone, getBillImageCaption({ sale, shop }));
+    window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+    try {
+      await downloadBillImage({ sale, shop });
+      setShareNote('Customer chat opened. Attach the downloaded bill image, then tap Send.');
+      setShareSuccess(true);
+      setTimeout(() => setShareSuccess(false), 6000);
+    } catch (err) {
+      console.error('Bill image download failed:', err);
+      setShareNote('Customer chat opened with the bill text. The image could not be prepared.');
       setShareSuccess(true);
       setTimeout(() => setShareSuccess(false), 6000);
     } finally {
@@ -224,7 +244,7 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
                 </div>
                 <div>
                   <h4 className="text-xs font-bold text-slate-900">Share Bill on WhatsApp</h4>
-                  <p className="text-[10px] text-slate-500">Sends a proper bill image, not plain text</p>
+                  <p className="text-[10px] text-slate-500">Opens the customer chat and prepares the bill image</p>
                 </div>
               </div>
               <button
@@ -272,6 +292,14 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
                 <span>{sharing ? 'Making...' : 'Send'}</span>
               </button>
             </div>
+            <button
+              type="button"
+              onClick={handleShareImageOptions}
+              disabled={sharing}
+              className="text-[10px] text-emerald-800 underline underline-offset-2 font-semibold disabled:opacity-60"
+            >
+              Share image options (choose WhatsApp/contact)
+            </button>
 
             {/* Toggle WhatsApp message preview */}
             <div>
@@ -300,8 +328,8 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
             onClick={handleShareWhatsApp}
             disabled={sharing}
             className="p-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl shadow-sm shadow-emerald-600/20 transition-all flex items-center justify-center shrink-0"
-            title="Share bill image via WhatsApp"
-            aria-label="Share bill image via WhatsApp"
+            title="Open customer WhatsApp chat and prepare bill image"
+            aria-label="Open customer WhatsApp chat and prepare bill image"
           >
             {sharing ? <Loader2 className="h-4 w-4 animate-spin" /> : <WhatsAppIcon className="h-4 w-4" />}
           </button>
