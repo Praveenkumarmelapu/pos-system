@@ -33,7 +33,7 @@ export const translations = {
 
     // POS & Billing
     scanProduct: 'Scan Product',
-    scanOrEnterBarcode: 'Scan barcode or type code...',
+    scanOrEnterBarcode: 'Scan or type barcode...',
     searchPlaceholder: 'Search by product name, brand...',
     cartEmptyTitle: 'Bill is Empty',
     cartEmptyDesc: 'Scan a barcode or tap products to add to bill',
@@ -104,7 +104,7 @@ export const translations = {
 
     // POS & Billing
     scanProduct: 'బార్‌కోడ్ స్కాన్ చేయండి',
-    scanOrEnterBarcode: 'బార్‌కోడ్ స్కాన్ చేయండి లేదా టైప్ చేయండి...',
+    scanOrEnterBarcode: 'బార్‌కోడ్ స్కాన్/టైప్ చేయండి',
     searchPlaceholder: 'సరుకు పేరుతో వెతకండి...',
     cartEmptyTitle: 'బిల్లు ఖాళీగా ఉంది',
     cartEmptyDesc: 'బార్‌కోడ్ స్కాన్ చేసి లేదా సరుకుపై క్లిక్ చేసి బిల్లులో చేర్చండి',

@@ -319,7 +319,7 @@ export function CategoriesPage() {
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
           >
             <Plus className="h-4 w-4" />
-            <span>+ Add Category</span>
+            <span>Add Category</span>
           </button>
         </div>
       </div>
@@ -360,8 +360,8 @@ export function CategoriesPage() {
       {activeTab === 'categories' && (
         <div className="space-y-4">
           {/* Search bar */}
-          <div className="flex items-center justify-between gap-4">
-            <div className="relative flex-1 max-w-md">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
+            <div className="relative w-full sm:flex-1 max-w-md">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <input
                 type="text"
