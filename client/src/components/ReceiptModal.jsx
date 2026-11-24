@@ -160,10 +160,20 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
                 </div>
               )}
               {sale.totalTax > 0 && (
-                <div className="flex justify-between text-slate-600">
-                  <span>GST Total:</span>
-                  <span className="font-sans">+{formatCurrency(sale.totalTax)}</span>
-                </div>
+                <>
+                  <div className="flex justify-between text-slate-600">
+                    <span>CGST:</span>
+                    <span className="font-sans">+{formatCurrency(Math.round(sale.totalTax / 2))}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>SGST:</span>
+                    <span className="font-sans">+{formatCurrency(sale.totalTax - Math.round(sale.totalTax / 2))}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>GST Total:</span>
+                    <span className="font-sans">+{formatCurrency(sale.totalTax)}</span>
+                  </div>
+                </>
               )}
               <div className="flex justify-between text-sm font-bold pt-1 border-t border-slate-300">
                 <span>GRAND TOTAL:</span>

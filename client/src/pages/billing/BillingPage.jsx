@@ -34,9 +34,11 @@ import { ProductImage } from '../../components/ui/ProductImage';
 import { CategoryPills } from '../../components/ui/CategoryPills';
 import { NotificationToast } from '../../components/ui/NotificationToast';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { t, useLanguage } from '../../utils/i18n';
 import { formatCurrency } from '../../utils/formatters';
 
 export function BillingPage() {
+  useLanguage();
   const {
     items,
     addItem,
@@ -430,7 +432,7 @@ export function BillingPage() {
                   data-barcode-input="true"
                   value={barcodeInput}
                   onChange={(e) => setBarcodeInput(e.target.value)}
-                  placeholder="Scan barcode or enter code — press Enter"
+                  placeholder={t('scanOrEnterBarcode')}
                   className="w-full pl-10 pr-4 py-2.5 bg-blue-50/30 border-2 border-action/40 rounded-lg text-xs sm:text-sm font-mono focus:bg-white focus:ring-2 focus:ring-action/20 focus:border-action focus:outline-none transition-all placeholder:text-txt-muted text-txt"
                 />
                 {barcodeInput && (
@@ -569,7 +571,7 @@ export function BillingPage() {
           <div className="flex items-center gap-2 text-txt truncate">
             <User className="h-3.5 w-3.5 text-action shrink-0" />
             <span className="font-semibold truncate">
-              {selectedCustomer?.name || 'Walk-in Customer'}
+              {selectedCustomer?.name || t('walkInCustomer')}
             </span>
             {selectedCustomer?.outstandingUdhaar > 0 && (
               <span className="text-[10px] font-bold text-danger bg-danger-light px-1.5 py-0.2 rounded border border-red-200">
@@ -593,7 +595,7 @@ export function BillingPage() {
               <div className="h-16 w-16 rounded-2xl bg-slate-50 flex items-center justify-center mb-3">
                 <ShoppingCart className="h-8 w-8 stroke-[1.2] text-slate-300" />
               </div>
-              <p className="text-xs font-bold text-slate-700">Cart is empty</p>
+              <p className="text-xs font-bold text-slate-700">{t('cartEmptyTitle')}</p>
               <p className="text-[11px] text-slate-400 mt-1 max-w-[200px] leading-relaxed">
                 Scan barcodes or tap products on the left to start billing
               </p>
@@ -806,7 +808,7 @@ export function BillingPage() {
             <div className="p-4 overflow-y-auto space-y-3 flex-1 divide-y divide-slate-100">
               {items.length === 0 ? (
                 <div className="py-12 text-center text-slate-400 text-xs">
-                  Bill is currently empty. Scan or select items.
+                  {t('cartEmptyDesc')}
                 </div>
               ) : (
                 items.map((item) => {
@@ -871,7 +873,7 @@ export function BillingPage() {
             {/* Drawer Checkout Footer */}
             <div className="p-4 bg-surface-muted border-t border-border space-y-3">
               <div className="flex justify-between items-baseline text-xs">
-                <span className="text-txt-secondary font-bold uppercase">Total Payable:</span>
+                <span className="text-txt-secondary font-bold uppercase">{t('totalPayable')}:</span>
                 <span className="text-lg font-bold text-txt font-mono">
                   {formatCurrency(totals.grandTotalPaise)}
                 </span>

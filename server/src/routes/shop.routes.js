@@ -74,6 +74,69 @@ router.post('/staff', async (req, res, next) => {
   }
 });
 
+/**
+ * Edit a staff member: rename, change role (resets that role's default
+ * permissions), or suspend/reactivate their access to this shop.
+ */
+router.patch('/staff/:membershipId', async (req, res, next) => {
+  try {
+    const { name, role, status } = z.object({
+      name: z.string().trim().min(2).max(120).optional(),
+      role: z.enum(['cashier', 'manager']).optional(),
+      status: z.enum(['active', 'suspended']).optional()
+    }).parse(req.body);
+
+    const membership = await Membership.findOne({ _id: req.params.membershipId, shopId: req.tenant.shopId });
+    if (!membership) {
+      return sendError(res, 'Staff member not found in this shop.', 404, 'STAFF_NOT_FOUND');
+    }
+    if (membership.role === 'owner') {
+      return sendError(res, 'The shop owner account cannot be edited here.', 400, 'CANNOT_EDIT_OWNER');
+    }
+    if (membership.userId.toString() === req.user._id.toString()) {
+      return sendError(res, 'You cannot change your own role or access.', 400, 'CANNOT_EDIT_SELF');
+    }
+
+    const staffUser = await User.findById(membership.userId);
+    if (!staffUser) {
+      return sendError(res, 'The staff user account no longer exists.', 404, 'USER_NOT_FOUND');
+    }
+
+    if (name && name !== staffUser.name) {
+      staffUser.name = name;
+      await staffUser.save();
+    }
+    if (role && role !== membership.role) {
+      membership.role = role;
+      membership.permissions = role === 'manager' ? ['pos:bill', 'inventory:manage', 'reports:view'] : ['pos:bill'];
+    }
+    if (status && status !== membership.status) {
+      membership.status = status;
+    }
+    await membership.save();
+
+    await AuditLog.create({
+      shopId: req.tenant.shopId,
+      userId: req.user._id,
+      action: 'staff:updated',
+      resourceType: 'membership',
+      resourceId: membership._id.toString(),
+      details: { staffEmail: staffUser.email, role: membership.role, status: membership.status, renamed: Boolean(name) }
+    }).catch((error) => console.error('Could not record the staff update audit event:', error.message));
+
+    return sendSuccess(res, {
+      id: membership._id,
+      name: staffUser.name,
+      email: staffUser.email,
+      role: membership.role,
+      status: membership.status,
+      permissions: membership.permissions
+    }, 'Staff member updated');
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/password-reset-requests', async (req, res, next) => {
   try {
     const requests = await PasswordResetRequest.find({ shopId: req.tenant.shopId, status: 'pending' }).sort({ createdAt: -1 }).limit(50);

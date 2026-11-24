@@ -15,7 +15,8 @@ import {
   Download,
   AlertTriangle,
   Printer,
-  Eye
+  Eye,
+  FileSpreadsheet
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -27,6 +28,7 @@ import { StockBadge } from '../../components/ui/StockBadge';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { CategoryPills } from '../../components/ui/CategoryPills';
 import { formatCurrency } from '../../utils/formatters';
+import { toCsv, downloadCsv } from '../../utils/csv';
 
 export function ProductsPage() {
   const { activeShop } = useAuth();
@@ -164,6 +166,30 @@ export function ProductsPage() {
             <Printer className="h-4 w-4 text-slate-500" />
             <span>Bulk Labels</span>
           </Link>
+
+          <button
+            onClick={() => {
+              const csv = toCsv(products, [
+                { key: 'barcode', label: 'Barcode' },
+                { key: 'name', label: 'Name' },
+                { key: 'brand', label: 'Brand' },
+                { key: 'category', label: 'Category' },
+                { key: 'sellingPrice', label: 'Selling Price (Rs)', value: (p) => (p.sellingPrice / 100).toFixed(2) },
+                { key: 'mrp', label: 'MRP (Rs)', value: (p) => ((p.mrp || 0) / 100).toFixed(2) },
+                { key: 'purchasePrice', label: 'Purchase Price (Rs)', value: (p) => ((p.purchasePrice || 0) / 100).toFixed(2) },
+                { key: 'stockQuantity', label: 'Stock Qty' },
+                { key: 'unit', label: 'Unit' },
+                { key: 'taxRate', label: 'GST %' },
+                { key: 'minStockThreshold', label: 'Low Stock Alert At' }
+              ]);
+              downloadCsv(`products-${new Date().toISOString().slice(0, 10)}.csv`, csv);
+            }}
+            className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all"
+            title="Download the product list as a CSV (Excel) file"
+          >
+            <FileSpreadsheet className="h-4 w-4 text-slate-500" />
+            <span>Export CSV</span>
+          </button>
 
           {canManage && (
           <button

@@ -385,3 +385,91 @@ export async function getSalesTrends(req, res, next) {
     next(err);
   }
 }
+
+/**
+ * Monthly GST summary: taxable value and GST collected per tax rate,
+ * net of returns, with the CGST/SGST split (intra-state).
+ * Month is interpreted in Asia/Kolkata. Query: ?month=YYYY-MM (default: current month).
+ */
+export async function getGstSummary(req, res, next) {
+  try {
+    const shopId = req.tenant.shopId;
+    const monthParam = req.query.month;
+
+    let year;
+    let monthIndex; // 0-based
+    if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) {
+      year = parseInt(monthParam.slice(0, 4), 10);
+      monthIndex = parseInt(monthParam.slice(5, 7), 10) - 1;
+    } else {
+      const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+      year = istNow.getUTCFullYear();
+      monthIndex = istNow.getUTCMonth();
+    }
+
+    // IST month boundaries expressed in UTC (IST = UTC+5:30)
+    const startDate = new Date(Date.UTC(year, monthIndex, 1, -5, -30));
+    const endDate = new Date(Date.UTC(monthIndex === 11 ? year + 1 : year, monthIndex === 11 ? 0 : monthIndex + 1, 1, -5, -30));
+
+    const sales = await Sale.find({
+      shopId,
+      saleDate: { $gte: startDate, $lt: endDate },
+      status: { $in: ['completed', 'partially_returned', 'returned'] }
+    });
+
+    const byRate = new Map();
+    let totalBills = 0;
+    let totalTaxable = 0;
+    let totalTax = 0;
+    let totalRefunds = 0;
+
+    for (const sale of sales) {
+      totalBills += 1;
+      totalRefunds += sale.refundTotal || 0;
+
+      const returnedQty = new Map();
+      (sale.returns || []).forEach((entry) => {
+        const key = entry.productId.toString();
+        returnedQty.set(key, (returnedQty.get(key) || 0) + entry.quantity);
+      });
+
+      for (const item of sale.items) {
+        const key = item.productId.toString();
+        const netQty = item.quantity - (returnedQty.get(key) || 0);
+        if (netQty <= 0) continue;
+        const frac = netQty / item.quantity;
+        const tax = Math.round((item.taxAmount || 0) * frac);
+        const taxable = Math.round(((item.lineTotal || 0) - (item.taxAmount || 0)) * frac);
+        const rate = item.taxRate || 0;
+        const bucket = byRate.get(rate) || { taxRate: rate, taxableValue: 0, taxAmount: 0 };
+        bucket.taxableValue += taxable;
+        bucket.taxAmount += tax;
+        byRate.set(rate, bucket);
+        totalTaxable += taxable;
+        totalTax += tax;
+      }
+    }
+
+    const cgst = Math.round(totalTax / 2);
+    const sgst = totalTax - cgst;
+
+    return sendSuccess(res, {
+      month: `${year}-${String(monthIndex + 1).padStart(2, '0')}`,
+      totalBills,
+      totalTaxable,
+      totalTax,
+      cgst,
+      sgst,
+      totalRefunds,
+      rates: [...byRate.values()]
+        .sort((a, b) => a.taxRate - b.taxRate)
+        .map((bucket) => ({
+          ...bucket,
+          cgst: Math.round(bucket.taxAmount / 2),
+          sgst: bucket.taxAmount - Math.round(bucket.taxAmount / 2)
+        }))
+    }, 'GST summary retrieved');
+  } catch (err) {
+    next(err);
+  }
+}

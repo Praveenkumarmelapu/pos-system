@@ -12,11 +12,13 @@ import {
   ShoppingBag,
   CreditCard,
   MessageCircle,
-  RotateCcw
+  RotateCcw,
+  FileSpreadsheet
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { ReceiptModal } from '../../components/ReceiptModal';
 import { ReturnModal } from '../../components/ReturnModal';
+import { toCsv, downloadCsv } from '../../utils/csv';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { WhatsAppIcon } from '../../components/ui/WhatsAppIcon';
@@ -30,6 +32,11 @@ export function ReportsPage() {
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [returnSale, setReturnSale] = useState(null);
   const [returnOpen, setReturnOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('invoices');
+  const [gstMonth, setGstMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [gstData, setGstData] = useState(null);
+  const [gstLoading, setGstLoading] = useState(false);
+  const [gstError, setGstError] = useState('');
   const { activeShop } = useAuth();
 
   const loadSales = async () => {
@@ -58,6 +65,56 @@ export function ReportsPage() {
   const handleReturn = (sale) => {
     setReturnSale(sale);
     setReturnOpen(true);
+  };
+
+  const loadGstSummary = async (month) => {
+    setGstLoading(true);
+    setGstError('');
+    try {
+      const res = await api.get('/reports/gst-summary', { params: { month } });
+      setGstData(res.data.data);
+    } catch (err) {
+      setGstError(err.response?.data?.error?.message || 'Could not load the GST summary.');
+    } finally {
+      setGstLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'gst') loadGstSummary(gstMonth);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, gstMonth]);
+
+  const exportSalesCsv = () => {
+    const rows = filteredSales;
+    if (rows.length === 0) return;
+    const csv = toCsv(rows, [
+      { key: 'invoiceNumber', label: 'Invoice #' },
+      { key: 'saleDate', label: 'Date', value: (s) => formatDate(s.saleDate) },
+      { key: 'customerName', label: 'Customer' },
+      { key: 'cashierName', label: 'Cashier' },
+      { key: 'items', label: 'Items', value: (s) => (s.items || []).reduce((n, i) => n + i.quantity, 0) },
+      { key: 'paymentMethod', label: 'Payment Mode' },
+      { key: 'subtotal', label: 'Subtotal (Rs)', value: (s) => (s.subtotal / 100).toFixed(2) },
+      { key: 'totalDiscount', label: 'Discount (Rs)', value: (s) => (s.totalDiscount / 100).toFixed(2) },
+      { key: 'totalTax', label: 'GST (Rs)', value: (s) => (s.totalTax / 100).toFixed(2) },
+      { key: 'grandTotal', label: 'Grand Total (Rs)', value: (s) => (s.grandTotal / 100).toFixed(2) },
+      { key: 'refundTotal', label: 'Refunded (Rs)', value: (s) => ((s.refundTotal || 0) / 100).toFixed(2) },
+      { key: 'status', label: 'Status' }
+    ]);
+    downloadCsv(`sales-${new Date().toISOString().slice(0, 10)}.csv`, csv);
+  };
+
+  const exportGstCsv = () => {
+    if (!gstData) return;
+    const csv = toCsv(gstData.rates, [
+      { key: 'taxRate', label: 'GST Rate %' },
+      { key: 'taxableValue', label: 'Taxable Value (Rs)', value: (r) => (r.taxableValue / 100).toFixed(2) },
+      { key: 'cgst', label: 'CGST (Rs)', value: (r) => (r.cgst / 100).toFixed(2) },
+      { key: 'sgst', label: 'SGST (Rs)', value: (r) => (r.sgst / 100).toFixed(2) },
+      { key: 'taxAmount', label: 'Total GST (Rs)', value: (r) => (r.taxAmount / 100).toFixed(2) }
+    ]);
+    downloadCsv(`gst-summary-${gstData.month}.csv`, csv);
   };
 
   const statusBadge = (s) => {
@@ -93,16 +150,125 @@ export function ReportsPage() {
           </p>
         </div>
 
-        <button
-          onClick={loadSales}
-          className="p-2.5 border border-slate-200 bg-white rounded-xl text-slate-600 hover:bg-slate-50 shadow-xs self-start sm:self-auto"
-          title="Refresh Invoices"
-        >
-          <RefreshCw className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          {activeTab === 'invoices' && (
+            <button
+              onClick={exportSalesCsv}
+              className="px-3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-sm"
+              title="Download the invoices below as a CSV (Excel) file"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              <span>Export CSV</span>
+            </button>
+          )}
+          <button
+            onClick={loadSales}
+            className="p-2.5 border border-slate-200 bg-white rounded-xl text-slate-600 hover:bg-slate-50 shadow-xs"
+            title="Refresh Invoices"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit">
+        {[
+          { id: 'invoices', label: 'Invoices' },
+          { id: 'gst', label: 'GST Report' }
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+              activeTab === tab.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'gst' && (
+        <div className="space-y-4">
+          <div className="p-3 bg-white rounded-2xl border border-slate-200/80 shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col sm:flex-row sm:items-center gap-3">
+            <label className="text-xs font-bold text-slate-600 uppercase">Month</label>
+            <input
+              type="month"
+              value={gstMonth}
+              onChange={(e) => e.target.value && setGstMonth(e.target.value)}
+              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:outline-none"
+            />
+            <button
+              onClick={exportGstCsv}
+              disabled={!gstData || gstLoading}
+              className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-sm sm:ml-auto"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              <span>Download GST CSV</span>
+            </button>
+          </div>
+
+          {gstError && <p role="alert" className="text-xs font-semibold text-red-700">{gstError}</p>}
+
+          {gstLoading ? (
+            <p className="text-center py-8 text-slate-400 text-xs">Loading GST summary...</p>
+          ) : gstData && (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {[
+                  { label: 'Taxable Value', value: formatCurrency(gstData.totalTaxable), tone: 'text-slate-900' },
+                  { label: 'CGST (to Centre)', value: formatCurrency(gstData.cgst), tone: 'text-blue-700' },
+                  { label: 'SGST (to State)', value: formatCurrency(gstData.sgst), tone: 'text-purple-700' },
+                  { label: 'Total GST Collected', value: formatCurrency(gstData.totalTax), tone: 'text-emerald-700' }
+                ].map((card) => (
+                  <div key={card.label} className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{card.label}</p>
+                    <p className={`mt-1 text-lg font-extrabold ${card.tone}`}>{card.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_2px_10px_rgba(0,0,0,0.02)] overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-50 text-slate-500 uppercase border-b border-slate-200 font-bold tracking-wider">
+                      <tr>
+                        <th className="px-5 py-3.5">GST Rate</th>
+                        <th className="px-5 py-3.5 text-right">Taxable Value</th>
+                        <th className="px-5 py-3.5 text-right">CGST</th>
+                        <th className="px-5 py-3.5 text-right">SGST</th>
+                        <th className="px-5 py-3.5 text-right">Total GST</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {gstData.rates.length === 0 ? (
+                        <tr><td colSpan="5" className="text-center py-8 text-slate-400">No GST-rated sales in {gstData.month}.</td></tr>
+                      ) : (
+                        gstData.rates.map((r) => (
+                          <tr key={r.taxRate} className="hover:bg-slate-50/70">
+                            <td className="px-5 py-3.5 font-bold text-slate-900">{r.taxRate}%</td>
+                            <td className="px-5 py-3.5 text-right font-medium">{formatCurrency(r.taxableValue)}</td>
+                            <td className="px-5 py-3.5 text-right font-medium">{formatCurrency(r.cgst)}</td>
+                            <td className="px-5 py-3.5 text-right font-medium">{formatCurrency(r.sgst)}</td>
+                            <td className="px-5 py-3.5 text-right font-extrabold">{formatCurrency(r.taxAmount)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="px-5 py-3 text-[10px] text-slate-400 border-t border-slate-100">
+                  {gstData.totalBills} bills in {gstData.month}. Returns are netted out ({formatCurrency(gstData.totalRefunds)} refunded). Bill-level discounts are not allocated per rate.
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Filter Bar */}
+      {activeTab === 'invoices' && (<>
       <div className="p-3 bg-white rounded-2xl border border-slate-200/80 shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
@@ -228,6 +394,8 @@ export function ReportsPage() {
           </table>
         </div>
       </div>
+
+      </>)}
 
       <ReceiptModal
         isOpen={receiptOpen}

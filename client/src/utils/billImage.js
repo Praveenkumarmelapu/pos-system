@@ -172,7 +172,12 @@ function layoutReceipt({ sale, shop }, ctx, draw) {
   // ---- Totals ----
   row('Subtotal:', money(sale.subtotal), 11);
   if (sale.totalDiscount > 0) row('Discount:', `-${money(sale.totalDiscount)}`, 11, 400, '#047857');
-  if (sale.totalTax > 0) row('GST Total:', `+${money(sale.totalTax)}`, 11, 400, '#374151');
+  if (sale.totalTax > 0) {
+    const cgst = Math.round(sale.totalTax / 2);
+    row('CGST:', `+${money(cgst)}`, 11, 400, '#374151');
+    row('SGST:', `+${money(sale.totalTax - cgst)}`, 11, 400, '#374151');
+    row('GST Total:', `+${money(sale.totalTax)}`, 11, 400, '#374151');
+  }
   advance(2);
   row('GRAND TOTAL:', money(sale.grandTotal), 14, 800);
   advance(2);

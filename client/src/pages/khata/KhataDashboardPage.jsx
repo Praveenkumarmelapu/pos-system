@@ -14,10 +14,12 @@ import {
   Plus,
   RefreshCw,
   Printer,
-  MessageCircle
+  MessageCircle,
+  FileSpreadsheet
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { formatCurrency, formatDate } from '../../utils/formatters';
+import { toCsv, downloadCsv } from '../../utils/csv';
 import { ReceivePaymentModal } from '../../components/ReceivePaymentModal';
 import { CustomerSelectModal } from '../../components/CustomerSelectModal';
 import { WhatsAppReminderModal } from '../../components/WhatsAppReminderModal';
@@ -93,6 +95,25 @@ export function KhataDashboardPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              if (customers.length === 0) return;
+              const csv = toCsv(customers, [
+                { key: 'name', label: 'Customer' },
+                { key: 'phone', label: 'Phone' },
+                { key: 'outstandingUdhaar', label: 'Outstanding Udhaar (Rs)', value: (c) => (c.outstandingUdhaar / 100).toFixed(2) },
+                { key: 'totalPurchases', label: 'Total Purchases (Rs)', value: (c) => ((c.totalPurchases || 0) / 100).toFixed(2) },
+                { key: 'totalBills', label: 'Bills' },
+                { key: 'creditLimit', label: 'Credit Limit (Rs)', value: (c) => ((c.creditLimit || 0) / 100).toFixed(2) },
+                { key: 'lastPaymentAt', label: 'Last Payment', value: (c) => (c.lastPaymentAt ? formatDate(c.lastPaymentAt) : '') }
+              ]);
+              downloadCsv(`khata-${new Date().toISOString().slice(0, 10)}.csv`, csv);
+            }}
+            className="p-2 border border-slate-300 rounded-xl text-slate-600 hover:bg-slate-50 text-xs font-semibold flex items-center gap-1.5"
+            title="Download the khata customer list as a CSV (Excel) file"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+          </button>
           <button
             onClick={() => loadKhataData()}
             className="p-2 border border-slate-300 rounded-xl text-slate-600 hover:bg-slate-50 text-xs font-semibold flex items-center gap-1.5"

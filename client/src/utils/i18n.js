@@ -7,16 +7,29 @@ export const translations = {
   en: {
     // Navigation
     home: 'Home',
+    dashboard: 'Dashboard',
     newBill: 'New Bill',
+    bill: 'Bill',
     products: 'Products',
+    categories: 'Categories',
+    inventory: 'Inventory',
     stock: 'Stock & Audit',
     sales: 'Sales & Bills',
-    customers: 'Customers & Khata',
+    salesReturns: 'Sales & Returns',
+    customers: 'Customers',
+    khata: 'Khata / Udhaar',
     staff: 'Staff & Cashiers',
+    employees: 'Employees',
     hardware: 'Printers & Scanners',
     settings: 'Shop Settings',
     superAdmin: 'Super Admin',
     logout: 'Log Out',
+    more: 'More',
+    sectionMain: 'Main',
+    sectionCustomers: 'Customers',
+    sectionManagement: 'Management',
+    sectionPlatform: 'Platform',
+    language: 'Language',
 
     // POS & Billing
     scanProduct: 'Scan Product',
@@ -65,16 +78,29 @@ export const translations = {
   te: {
     // Navigation
     home: 'హోమ్',
+    dashboard: 'డాష్‌బోర్డ్',
     newBill: 'క్రొత్త బిల్లు',
+    bill: 'బిల్లు',
     products: 'సరుకులు (Products)',
+    categories: 'వర్గాలు (Categories)',
+    inventory: 'స్టాక్ జాబితా',
     stock: 'స్టాక్ నిల్వ (Stock)',
     sales: 'అమ్మకాలు & బిల్లులు',
-    customers: 'ఖాతా & కస్టమర్లు',
+    salesReturns: 'అమ్మకాలు & రిటర్న్స్',
+    customers: 'కస్టమర్లు',
+    khata: 'ఖాతా / ఉదార్',
     staff: 'సిబ్బంది & క్యాషియర్లు',
+    employees: 'సిబ్బంది',
     hardware: 'ప్రింటర్ & స్కానర్',
     settings: 'షాప్ సెట్టింగ్స్',
     superAdmin: 'సూపర్ అడ్మిన్',
     logout: 'లాగ్ అవుట్',
+    more: 'మరిన్ని',
+    sectionMain: 'ప్రధానం',
+    sectionCustomers: 'కస్టమర్లు',
+    sectionManagement: 'నిర్వహణ',
+    sectionPlatform: 'ప్లాట్‌ఫాం',
+    language: 'భాష',
 
     // POS & Billing
     scanProduct: 'బార్‌కోడ్ స్కాన్ చేయండి',
@@ -138,4 +164,16 @@ export function setLanguage(lang) {
 
 export function t(key) {
   return translations[currentLanguage]?.[key] || translations.en[key] || key;
+}
+
+import { useSyncExternalStore } from 'react';
+
+function subscribe(callback) {
+  window.addEventListener('languagechange', callback);
+  return () => window.removeEventListener('languagechange', callback);
+}
+
+/** React hook: re-renders the component when the language changes. */
+export function useLanguage() {
+  return useSyncExternalStore(subscribe, getLanguage);
 }

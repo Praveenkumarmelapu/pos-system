@@ -25,36 +25,38 @@ import {
   Search,
   Tag,
   KeyRound,
+  Languages,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { t, setLanguage, useLanguage } from '../utils/i18n';
 
 const NAV_SECTIONS = [
   {
-    label: 'MAIN',
+    labelKey: 'sectionMain',
     items: [
-      { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['owner', 'manager'] },
-      { to: '/pos', label: 'New Bill', icon: ShoppingCart, highlight: true },
-      { to: '/products', label: 'Products', icon: Package },
-      { to: '/categories', label: 'Categories', icon: Tag },
-      { to: '/inventory', label: 'Inventory', icon: Layers, roles: ['owner', 'manager'] },
-      { to: '/reports', label: 'Sales & Returns', icon: ReceiptText },
+      { to: '/dashboard', labelKey: 'dashboard', icon: LayoutDashboard, roles: ['owner', 'manager'] },
+      { to: '/pos', labelKey: 'newBill', icon: ShoppingCart, highlight: true },
+      { to: '/products', labelKey: 'products', icon: Package },
+      { to: '/categories', labelKey: 'categories', icon: Tag },
+      { to: '/inventory', labelKey: 'inventory', icon: Layers, roles: ['owner', 'manager'] },
+      { to: '/reports', labelKey: 'salesReturns', icon: ReceiptText },
     ],
   },
   {
-    label: 'CUSTOMERS',
+    labelKey: 'sectionCustomers',
     items: [
-      { to: '/customers', label: 'Customers', icon: Users },
-      { to: '/khata', label: 'Khata / Udhaar', icon: Wallet },
+      { to: '/customers', labelKey: 'customers', icon: Users },
+      { to: '/khata', labelKey: 'khata', icon: Wallet },
     ],
   },
   {
-    label: 'MANAGEMENT',
+    labelKey: 'sectionManagement',
     items: [
-      { to: '/employees', label: 'Employees', icon: UserCheck, roles: ['owner'] },
-      { to: '/hardware', label: 'Printers & Scanners', icon: Printer },
-      { to: '/settings', label: 'Shop Settings', icon: Settings, roles: ['owner'] },
+      { to: '/employees', labelKey: 'employees', icon: UserCheck, roles: ['owner'] },
+      { to: '/hardware', labelKey: 'hardware', icon: Printer },
+      { to: '/settings', labelKey: 'settings', icon: Settings, roles: ['owner'] },
     ],
   },
 ];
@@ -79,7 +81,7 @@ function NavItem({ item, collapsed, cartCount }) {
           )}
           <Icon className={`h-[18px] w-[18px] shrink-0 ${isActive ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'}`} />
           {!collapsed && (
-            <span className="truncate">{item.label}</span>
+            <span className="truncate">{t(item.labelKey)}</span>
           )}
           {!collapsed && item.highlight && cartCount > 0 && (
             <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500 text-white leading-none">
@@ -93,8 +95,9 @@ function NavItem({ item, collapsed, cartCount }) {
 }
 
 function SidebarContent({ user, activeShop, isSuperAdmin, logout, cartCount, collapsed, onClose }) {
+  const language = useLanguage();
   const adminItems = isSuperAdmin
-    ? [{ to: '/admin', label: 'Super Admin', icon: ShieldCheck }]
+    ? [{ to: '/admin', labelKey: 'superAdmin', icon: ShieldCheck }]
     : [];
 
   const storedShop = (() => {
@@ -129,10 +132,10 @@ function SidebarContent({ user, activeShop, isSuperAdmin, logout, cartCount, col
           const visibleItems = section.items.filter(canSee);
           if (visibleItems.length === 0) return null;
           return (
-          <div key={section.label}>
+          <div key={section.labelKey}>
             {!collapsed && (
               <p className="px-3 pb-1.5 text-[10px] font-bold text-slate-600 uppercase tracking-widest">
-                {section.label}
+                {t(section.labelKey)}
               </p>
             )}
             <div className="space-y-0.5">
@@ -158,6 +161,38 @@ function SidebarContent({ user, activeShop, isSuperAdmin, logout, cartCount, col
           </div>
         )}
       </nav>
+
+      {/* Language Toggle */}
+      <div className={`px-3 pb-2 shrink-0 ${collapsed ? 'flex justify-center' : ''}`}>
+        {collapsed ? (
+          <button
+            onClick={() => setLanguage(language === 'en' ? 'te' : 'en')}
+            title={t('language')}
+            aria-label={t('language')}
+            className="p-2 rounded-md text-slate-400 hover:bg-white/5 hover:text-slate-200 transition-colors"
+          >
+            <Languages className="h-[18px] w-[18px]" />
+          </button>
+        ) : (
+          <div className="flex items-center gap-1 p-1 rounded-lg bg-white/5 border border-white/10">
+            <Languages className="h-3.5 w-3.5 text-slate-500 ml-1 shrink-0" />
+            {[
+              { id: 'en', label: 'EN' },
+              { id: 'te', label: 'తెలుగు' }
+            ].map((option) => (
+              <button
+                key={option.id}
+                onClick={() => setLanguage(option.id)}
+                className={`flex-1 px-2 py-1 rounded-md text-[11px] font-bold transition-colors ${
+                  language === option.id ? 'bg-action text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* User Footer */}
       <div className="px-2 py-3 border-t border-white/10 shrink-0">
@@ -187,6 +222,7 @@ function SidebarContent({ user, activeShop, isSuperAdmin, logout, cartCount, col
 }
 
 export function AppLayout() {
+  useLanguage();
   const { user, activeShop, isSuperAdmin, logout } = useAuth();
   const { totals } = useCart();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -317,11 +353,11 @@ export function AppLayout() {
         {/* Mobile Bottom Nav */}
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-surface-card border-t border-border px-1 py-1.5 flex items-center justify-around select-none safe-area-pb">
           {[
-            { to: '/dashboard', icon: LayoutDashboard, label: 'Home' },
-            { to: '/pos', icon: ShoppingCart, label: 'Bill' },
-            { to: '/products', icon: Package, label: 'Products' },
-            { to: '/khata', icon: Wallet, label: 'Khata' },
-          ].map(({ to, icon: Icon, label }) => (
+            { to: '/dashboard', icon: LayoutDashboard, labelKey: 'home' },
+            { to: '/pos', icon: ShoppingCart, labelKey: 'bill' },
+            { to: '/products', icon: Package, labelKey: 'products' },
+            { to: '/khata', icon: Wallet, labelKey: 'khata' },
+          ].map(({ to, icon: Icon, labelKey }) => (
             <NavLink
               key={to}
               to={to}
@@ -339,7 +375,7 @@ export function AppLayout() {
                   </span>
                 )}
               </div>
-              <span>{label}</span>
+              <span>{t(labelKey)}</span>
             </NavLink>
           ))}
           <button
@@ -347,7 +383,7 @@ export function AppLayout() {
             className="flex flex-col items-center gap-0.5 py-1.5 px-3 rounded-lg text-[10px] font-semibold text-txt-secondary"
           >
             <Menu className="h-5 w-5" />
-            <span>More</span>
+            <span>{t('more')}</span>
           </button>
         </nav>
       </div>
