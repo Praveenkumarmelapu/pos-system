@@ -176,6 +176,87 @@ export async function createProduct(req, res, next) {
   }
 }
 
+/**
+ * Bulk import of a shop's price list (CSV import on the client sends parsed rows).
+ * New barcodes are created; existing barcodes get name/price/stock refreshed.
+ * Max 500 rows per request.
+ */
+export async function bulkImportProducts(req, res, next) {
+  try {
+    const shopId = req.tenant.shopId;
+    const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 500) : [];
+    if (!items.length) {
+      return sendError(res, 'No items to import', 400);
+    }
+
+    let created = 0;
+    let updated = 0;
+    const errors = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const row = items[i];
+      try {
+        const validated = createProductSchema.parse({
+          purchasePrice: 0,
+          ...row
+        });
+
+        const existing = await Product.findOne({ shopId, barcode: validated.barcode });
+        if (existing) {
+          existing.isActive = true;
+          existing.name = validated.name;
+          existing.brand = validated.brand || existing.brand;
+          existing.category = validated.category || existing.category;
+          existing.subCategory = validated.subCategory || existing.subCategory;
+          existing.sellingPrice = rupeesToPaise(validated.sellingPrice);
+          existing.purchasePrice = rupeesToPaise(validated.purchasePrice);
+          existing.mrp = validated.mrp ? rupeesToPaise(validated.mrp) : rupeesToPaise(validated.sellingPrice);
+          existing.stockQuantity = validated.stockQuantity;
+          existing.unit = validated.unit || existing.unit;
+          existing.packSize = validated.packSize || existing.packSize;
+          await existing.save();
+          updated++;
+          continue;
+        }
+
+        const sellingPricePaise = rupeesToPaise(validated.sellingPrice);
+        await Product.create({
+          shopId,
+          barcode: validated.barcode,
+          name: validated.name,
+          brand: validated.brand || '',
+          category: validated.category || 'Others',
+          subCategory: validated.subCategory || 'General Others',
+          classificationStatus: 'manual',
+          description: validated.description || '',
+          imageUrl: validated.imageUrl || '',
+          purchasePrice: rupeesToPaise(validated.purchasePrice),
+          sellingPrice: sellingPricePaise,
+          mrp: validated.mrp ? rupeesToPaise(validated.mrp) : sellingPricePaise,
+          taxRate: validated.taxRate || 0,
+          stockQuantity: validated.stockQuantity || 0,
+          minStockThreshold: validated.minStockThreshold ?? 5,
+          unit: validated.unit || 'pcs',
+          packSize: validated.packSize || '',
+          isActive: true
+        });
+        created++;
+      } catch (rowErr) {
+        errors.push({ row: i + 1, barcode: String(row?.barcode || ''), reason: rowErr?.issues?.[0]?.message || rowErr.message });
+      }
+    }
+
+    return sendSuccess(res, {
+      created,
+      updated,
+      failed: errors.length,
+      errors: errors.slice(0, 20)
+    }, `Import finished: ${created} created, ${updated} updated, ${errors.length} failed`);
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function updateProduct(req, res, next) {
   try {
     const { id } = req.params;

@@ -3,6 +3,7 @@ import {
   getProducts,
   getProductById,
   createProduct,
+  bulkImportProducts,
   updateProduct,
   deleteProduct,
   generateInternalBarcode
@@ -17,6 +18,7 @@ router.use(authGuard, tenantContext);
 
 router.get('/', getProducts);
 router.get('/generate-barcode', requireRole('owner', 'manager'), generateInternalBarcode);
+router.post('/bulk-import', requireRole('owner', 'manager'), bulkImportProducts);
 router.get('/:id', getProductById);
 router.post('/', requireRole('owner', 'manager'), createProduct);
 router.patch('/:id', requireRole('owner', 'manager'), updateProduct);

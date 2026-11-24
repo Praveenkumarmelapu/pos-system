@@ -78,6 +78,7 @@ export function AddProductPage() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupSource, setLookupSource] = useState(null);
   const lookupRequest = useRef(0);
+  const nameInputRef = useRef(null);
   const filledBarcode = useRef(null);
   const [existingProduct, setExistingProduct] = useState(null);
   const [cameraModalOpen, setCameraModalOpen] = useState(false);
@@ -172,6 +173,8 @@ export function AddProductPage() {
       setLookupSource(match.lookupStatus === 'unavailable' ? 'unavailable' : match.source);
 
       if (!match.found) {
+        showToast('New barcode. Type the product name and price from the package.', 'info');
+        setTimeout(() => nameInputRef.current?.focus(), 50);
         return;
       }
       const p = match.product;
@@ -566,6 +569,7 @@ export function AddProductPage() {
                 <input
                   type="text"
                   required
+                  ref={nameInputRef}
                   value={name}
                   onChange={(e) => handleNameChange(e.target.value)}
                   placeholder="e.g. Tata Salt Vacuum Evaporated 1kg, Britannia Good Day Cashew 100g"
@@ -1031,7 +1035,7 @@ export function AddProductPage() {
       )}
 
       {/* Notification Toast */}
-      {toast && <NotificationToast message={toast.message} type={toast.type} />}
+      {toast && <NotificationToast toast={toast} onClose={() => setToast(null)} />}
     </div>
   );
 }

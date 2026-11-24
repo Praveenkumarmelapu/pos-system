@@ -757,7 +757,7 @@ export function CategoriesPage() {
       )}
 
       {/* Notification Toast */}
-      {toast && <NotificationToast message={toast.message} type={toast.type} />}
+      {toast && <NotificationToast toast={toast} onClose={() => setToast(null)} />}
     </div>
   );
 }

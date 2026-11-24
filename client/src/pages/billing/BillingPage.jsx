@@ -24,6 +24,7 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { useBarcodeScanner } from '../../hooks/useBarcodeScanner';
 const CameraScannerModal = lazy(() => import('../../components/CameraScannerModal').then(m => ({ default: m.CameraScannerModal })));
+const QuickAddProductModal = lazy(() => import('../../components/QuickAddProductModal').then(m => ({ default: m.QuickAddProductModal })));
 import { CheckoutModal } from '../../components/CheckoutModal';
 import { ReceiptModal } from '../../components/ReceiptModal';
 const ProductFormModal = lazy(() => import('../../components/ProductFormModal').then(m => ({ default: m.ProductFormModal })));
@@ -66,6 +67,10 @@ export function BillingPage() {
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [unregisteredBarcode, setUnregisteredBarcode] = useState('');
   const [barcodeMatch, setBarcodeMatch] = useState(null);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickAddBarcode, setQuickAddBarcode] = useState('');
+  const [quickAddMatch, setQuickAddMatch] = useState(null);
+  const suppressCodeRef = useRef({ code: '', until: 0 });
   const [completedSale, setCompletedSale] = useState(null);
   const [isSubmittingSale, setIsSubmittingSale] = useState(false);
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
@@ -134,7 +139,7 @@ export function BillingPage() {
     setLoading(true);
     try {
       const [prodRes, catRes] = await Promise.allSettled([
-        api.get('/products?limit=100'),
+        api.get('/products?limit=500'),
         api.get('/categories')
       ]);
       if (prodRes.status === 'fulfilled' && prodRes.value.data.success) {
@@ -161,6 +166,34 @@ export function BillingPage() {
       barcodeInputRef.current.focus();
     }
   }, []);
+
+  // Barcode normalization: scanners may strip or add leading zeros (UPC-A vs EAN-13)
+  const barcodeVariants = (code) => {
+    const c = String(code || '').trim();
+    if (!/^\d{12,14}$/.test(c)) return [c];
+    return [...new Set([c, c.replace(/^0+(?=\d{12}$)/, ''), c.padStart(13, '0'), c.padStart(14, '0')])];
+  };
+
+  // Local barcode index of the shop's own inventory: scan -> cart with zero network wait
+  const barcodeIndex = useMemo(() => {
+    const map = new Map();
+    products.forEach((p) => {
+      if (!p.barcode) return;
+      barcodeVariants(p.barcode).forEach((v) => {
+        if (!map.has(v)) map.set(v, p);
+      });
+    });
+    return map;
+  }, [products]);
+
+  const findLocalProduct = (code) => {
+    const variants = barcodeVariants(code);
+    for (let i = 0; i < variants.length; i++) {
+      const hit = barcodeIndex.get(variants[i]);
+      if (hit) return hit;
+    }
+    return null;
+  };
 
   // Filtered products list
   const filteredProducts = useMemo(() => {
@@ -196,9 +229,19 @@ export function BillingPage() {
     lastScannedTimeRef.current = now;
     setBarcodeInput('');
 
+    // Instant path: product already in shop inventory (loaded locally) - no network wait
+    const localProduct = findLocalProduct(cleanCode);
+    if (localProduct) {
+      playBeep();
+      addItem(localProduct);
+      showToast(`Added '${localProduct.name}' to cart`);
+      processingRef.current = false;
+      refocusScanner();
+      return;
+    }
+
     try {
       const res = await api.get(`/barcodes/lookup/${encodeURIComponent(cleanCode)}`);
-      setBarcodeMatch(res.data.data);
       if (res.data.success && res.data.data.found) {
         const match = res.data.data;
         if (match.source === 'shop_inventory') {
@@ -206,21 +249,25 @@ export function BillingPage() {
           addItem(match.product);
           showToast(`Added '${match.product.name}' to cart`);
         } else {
-          // Master catalog or Open Food Facts match
-          setUnregisteredBarcode(cleanCode);
-          setProductFormModalOpen(true);
-          showToast(`Found catalog item for barcode ${cleanCode}. Confirm to add to shop.`, 'info');
+          // Catalog match (master catalog / Open Food Facts): quick-add with details prefilled
+          setBarcodeMatch(match);
+          setQuickAddBarcode(cleanCode);
+          setQuickAddMatch(match);
+          setQuickAddOpen(true);
+          showToast(`Found '${match.product.name}' in catalog. Confirm price and save.`, 'info');
         }
       } else {
-        // Unknown barcode
-        setUnregisteredBarcode(cleanCode);
-        setProductFormModalOpen(true);
-        showToast(res.data.data.lookupStatus === 'unavailable' ? 'Catalog is unavailable. Retry or enter details.' : `No catalog match for ${cleanCode}. Add product details.`, 'warning');
+        // Unknown barcode: quick-add with just name + price
+        setQuickAddBarcode(cleanCode);
+        setQuickAddMatch(null);
+        setQuickAddOpen(true);
+        showToast(res.data.data.lookupStatus === 'unavailable' ? 'Catalog is unavailable. Enter details to save it.' : `New barcode. Enter name and price once - saved forever.`, 'warning');
       }
     } catch (err) {
       showToast(err.response?.data?.error?.message || 'Barcode lookup failed', 'error');
     } finally {
       processingRef.current = false;
+      refocusScanner();
     }
   };
 
@@ -229,8 +276,61 @@ export function BillingPage() {
     onScan: (scannedCode) => {
       handleBarcodeProcess(scannedCode);
     },
-    enabled: !cameraModalOpen && !checkoutModalOpen && !productFormModalOpen
+    enabled: !cameraModalOpen && !checkoutModalOpen && !productFormModalOpen && !quickAddOpen
   });
+
+  // Keep the scan box focused on desktops so a handheld scanner is always ready.
+  // Skipped on touch devices where focus pops the on-screen keyboard.
+  const isDesktopPointer = () => typeof window !== 'undefined' && window.matchMedia?.('(pointer: fine)').matches;
+  const refocusScanner = () => {
+    if (isDesktopPointer()) barcodeInputRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!cameraModalOpen && !checkoutModalOpen && !productFormModalOpen && !receiptModalOpen && !quickAddOpen) {
+      refocusScanner();
+    }
+  }, [cameraModalOpen, checkoutModalOpen, productFormModalOpen, receiptModalOpen, quickAddOpen]);
+
+  // Camera scanner in billing runs in continuous mode: known items add instantly.
+  // Unknown barcodes pause the camera, run the full catalog lookup once, and open
+  // the quick-add sheet - after saving, the product is known forever.
+  const handleCameraScan = async (code) => {
+    const cleanCode = String(code || '').trim();
+    if (!cleanCode) return;
+    if (cleanCode === suppressCodeRef.current.code && Date.now() < suppressCodeRef.current.until) return;
+
+    const localProduct = findLocalProduct(cleanCode);
+    if (localProduct) {
+      addItem(localProduct);
+      showToast(`Added '${localProduct.name}' to cart`);
+      return;
+    }
+
+    setQuickAddBarcode(cleanCode);
+    setQuickAddMatch(null);
+    setQuickAddOpen(true); // camera pauses while this is open
+    try {
+      const res = await api.get(`/barcodes/lookup/${encodeURIComponent(cleanCode)}`);
+      if (res.data.success && res.data.data.found && res.data.data.source !== 'shop_inventory') {
+        setQuickAddMatch(res.data.data);
+        setBarcodeMatch(res.data.data);
+      }
+    } catch {
+      // Quick-add still works without catalog data: name + price is enough
+    }
+  };
+
+  const handleQuickAddSaved = (product) => {
+    setProducts((prev) => [...prev.filter((p) => p._id !== product._id), product]);
+    addItem(product);
+    showToast(`Saved '${product.name}' - added to bill`);
+    suppressCodeRef.current = { code: quickAddBarcode, until: Date.now() + 5000 };
+    setQuickAddOpen(false);
+    setQuickAddBarcode('');
+    setQuickAddMatch(null);
+    setBarcodeMatch(null);
+  };
 
   const handleBarcodeFormSubmit = (e) => {
     e.preventDefault();
@@ -798,8 +898,10 @@ export function BillingPage() {
         <Suspense fallback={null}>
           <CameraScannerModal
             isOpen={cameraModalOpen}
+            continuous
+            paused={quickAddOpen}
             onClose={() => setCameraModalOpen(false)}
-            onScanSuccess={handleBarcodeProcess}
+            onScanSuccess={handleCameraScan}
           />
         </Suspense>
       )}
@@ -820,6 +922,23 @@ export function BillingPage() {
 
       {productFormModalOpen && (
       <Suspense fallback={null}>
+      {quickAddOpen && (
+        <Suspense fallback={null}>
+          <QuickAddProductModal
+            isOpen={quickAddOpen}
+            barcode={quickAddBarcode}
+            match={quickAddMatch}
+            onClose={() => {
+              setQuickAddOpen(false);
+              setQuickAddBarcode('');
+              setQuickAddMatch(null);
+              refocusScanner();
+            }}
+            onSaved={handleQuickAddSaved}
+          />
+        </Suspense>
+      )}
+
       <ProductFormModal
         isOpen={productFormModalOpen}
         initialBarcode={unregisteredBarcode}

@@ -186,15 +186,34 @@ export async function lookupBarcode(shopId, barcode) {
 
   let catalogUnavailable = false;
   if (/^\d{8}$|^\d{12,14}$/.test(cleanBarcode)) try {
-    const externalResponse = await axios.get(`${config.openFoodFactsUrl}/${encodeURIComponent(cleanBarcode.replace(/^0+(?=\d{12}$)/, ''))}.json`, {
-      timeout: 2500,
-      validateStatus: status => (status >= 200 && status < 300) || status === 404,
-      headers: {
-        'User-Agent': 'RetailPOSSaas/2.0 (contact@retailpos.local)'
-      }
-    });
+    const lookupCode = cleanBarcode.replace(/^0+(?=\d{12}$)/, '');
+    // Query both free catalogs in parallel so a miss on one costs no extra time
+    const [offSettled, upcSettled] = await Promise.allSettled([
+      axios.get(`${config.openFoodFactsUrl}/${encodeURIComponent(lookupCode)}.json`, {
+        timeout: 2500,
+        validateStatus: status => (status >= 200 && status < 300) || status === 404,
+        headers: {
+          'User-Agent': 'RetailPOSSaas/2.0 (contact@retailpos.local)'
+        }
+      }),
+      axios.get('https://api.upcitemdb.com/prod/trial/lookup', {
+        params: { upc: lookupCode },
+        timeout: 2500,
+        validateStatus: status => (status >= 200 && status < 300) || status === 404 || status === 429,
+        headers: {
+          'User-Agent': 'RetailPOSSaas/2.0 (contact@retailpos.local)'
+        }
+      })
+    ]);
 
-    if (externalResponse.data && externalResponse.data.status === 1 && externalResponse.data.product) {
+    const externalResponse = offSettled.status === 'fulfilled' ? offSettled.value : null;
+    const upcItem = upcSettled.status === 'fulfilled' && upcSettled.value?.data?.code === 'OK' && upcSettled.value.data.total > 0
+      ? upcSettled.value.data.items[0]
+      : null;
+
+    if (!externalResponse && upcSettled.status !== 'fulfilled') catalogUnavailable = true;
+
+    if (externalResponse?.data && externalResponse.data.status === 1 && externalResponse.data.product) {
       const p = externalResponse.data.product;
       const normalizedName = p.product_name_en || p.product_name || p.generic_name || '';
       const brand = p.brands || p.brand_owner || '';
@@ -262,6 +281,67 @@ export async function lookupBarcode(shopId, barcode) {
         matchType: normalizedName && extractedMrp ? 'complete' : 'partial',
         currency: 'INR',
         product: externalProduct
+      };
+    }
+
+    // Second free catalog: UPCitemdb trial (names/brands only, no reliable Indian prices)
+    if (upcItem && (upcItem.title || upcItem.brand)) {
+      const upcName = String(upcItem.title || '').trim();
+      const upcBrand = String(upcItem.brand || '').trim();
+      const upcPackSize = String(upcItem.size || upcItem.weight || '').trim();
+      const classification = await classifyProduct({
+        name: upcName,
+        brand: upcBrand,
+        rawCategory: upcItem.category || '',
+        shopId
+      });
+
+      const upcProduct = {
+        barcode: cleanBarcode,
+        name: upcName || `Item ${cleanBarcode}`,
+        brand: upcBrand,
+        category: classification.category,
+        subCategory: classification.subCategory,
+        classificationStatus: classification.classificationStatus,
+        classificationConfidence: classification.confidence,
+        packSize: upcPackSize,
+        unit: 'pcs',
+        imageUrl: Array.isArray(upcItem.images) && upcItem.images.length ? upcItem.images[0] : null,
+        mrp: null,
+        sellingPrice: null,
+        purchasePrice: null,
+        suggestedSellingPrice: null,
+        suggestedPurchasePrice: null,
+        priceDetected: false,
+        isNewToShop: true
+      };
+
+      if (upcName) {
+        try {
+          await MasterProduct.create({
+            barcode: cleanBarcode,
+            name: upcProduct.name,
+            brand: upcProduct.brand,
+            category: upcProduct.category,
+            subCategory: upcProduct.subCategory,
+            packSize: upcProduct.packSize,
+            imageUrl: upcProduct.imageUrl,
+            mrp: 0,
+            verified: false,
+            source: 'upcitemdb'
+          });
+        } catch {
+          // Ignore duplicate insert race condition
+        }
+      }
+
+      return {
+        found: true,
+        source: 'external_catalog',
+        lookupStatus: 'partial',
+        matchType: 'partial',
+        currency: 'INR',
+        product: upcProduct
       };
     }
   } catch (err) {

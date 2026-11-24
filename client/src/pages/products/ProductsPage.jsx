@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { ProductFormModal } from '../../components/ProductFormModal';
+import { ImportCsvModal } from '../../components/ImportCsvModal';
 const BarcodeLabelModal = lazy(() => import('../../components/BarcodeLabelModal').then(m => ({ default: m.BarcodeLabelModal })));
 import { ProductImage } from '../../components/ui/ProductImage';
 import { StockBadge } from '../../components/ui/StockBadge';
@@ -40,6 +41,7 @@ export function ProductsPage() {
 
   // Modal
   const [modalOpen, setModalOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [labelProduct, setLabelProduct] = useState(null);
 
@@ -159,6 +161,15 @@ export function ProductsPage() {
             <Printer className="h-4 w-4 text-slate-500" />
             <span>Bulk Labels</span>
           </Link>
+
+          <button
+            onClick={() => setImportOpen(true)}
+            className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all"
+            title="Import your price list from a CSV file"
+          >
+            <Download className="h-4 w-4 text-slate-500" />
+            <span>Import CSV</span>
+          </button>
 
           <button
             onClick={() => {
@@ -404,6 +415,12 @@ export function ProductsPage() {
       )}
 
       {/* Add / Edit Product Modal */}
+      <ImportCsvModal
+        isOpen={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={loadProducts}
+      />
+
       <ProductFormModal
         isOpen={modalOpen}
         product={editingProduct}

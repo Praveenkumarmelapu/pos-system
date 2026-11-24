@@ -1,14 +1,49 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/browser';
-import { X, Camera, Volume2, AlertCircle } from 'lucide-react';
+import { DecodeHintType, BarcodeFormat } from '@zxing/library';
+import { X, Camera, Volume2, AlertCircle, Flashlight, FlashlightOff, CheckCircle2 } from 'lucide-react';
 
-export function CameraScannerModal({ isOpen, onClose, onScanSuccess }) {
+// Per-code cooldown so one barcode is not reported many times while it stays in view
+const SCAN_COOLDOWN_MS = 1500;
+
+// Only the formats a grocery shop actually uses: keeps decoding fast and avoids false reads
+const NATIVE_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf'];
+
+function videoConstraints(deviceId) {
+  const base = deviceId
+    ? { deviceId: { exact: deviceId } }
+    : { facingMode: { ideal: 'environment' } };
+  return {
+    video: { ...base, width: { ideal: 1280 }, height: { ideal: 720 } },
+    audio: false
+  };
+}
+
+async function getNativeDetector() {
+  if (typeof window === 'undefined' || !('BarcodeDetector' in window)) return null;
+  try {
+    const supported = await window.BarcodeDetector.getSupportedFormats();
+    const formats = NATIVE_FORMATS.filter(f => supported.includes(f));
+    if (!formats.length) return null;
+    return new window.BarcodeDetector({ formats });
+  } catch {
+    return null;
+  }
+}
+
+export function CameraScannerModal({ isOpen, onClose, onScanSuccess, continuous = false, paused = false }) {
   const videoRef = useRef(null);
   const callbacks = useRef({ onClose, onScanSuccess });
   useEffect(() => { callbacks.current = { onClose, onScanSuccess }; }, [onClose, onScanSuccess]);
+  const pausedRef = useRef(paused);
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
   const [cameras, setCameras] = useState([]);
   const [selectedCameraId, setSelectedCameraId] = useState('');
   const [error, setError] = useState(null);
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
+  const [lastScan, setLastScan] = useState(null);
+  const trackRef = useRef(null);
 
   // Audio beep generator using Web Audio API
   const playBeep = () => {
@@ -28,52 +63,155 @@ export function CameraScannerModal({ isOpen, onClose, onScanSuccess }) {
     } catch {}
   };
 
+  const toggleTorch = async () => {
+    const track = trackRef.current;
+    if (!track) return;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: !torchOn }] });
+      setTorchOn(!torchOn);
+    } catch {}
+  };
+
   useEffect(() => {
     if (!isOpen) return;
     const video = videoRef.current;
-    const reader = new BrowserMultiFormatReader();
     let cancelled = false;
-    let scanned = false;
-    let controls;
+    let controls;        // zxing controls
+    let stream;          // native getUserMedia stream
+    let frameHandle;     // requestVideoFrameCallback handle
+    let timer;           // setTimeout fallback
+    let stopped = false;
+    const lastHit = { code: '', time: 0 };
+
+    const stopAll = () => {
+      if (stopped) return;
+      stopped = true;
+      cancelled = true;
+      try { controls?.stop(); } catch {}
+      if (frameHandle != null && video?.cancelVideoFrameCallback) {
+        try { video.cancelVideoFrameCallback(frameHandle); } catch {}
+      }
+      if (timer != null) clearTimeout(timer);
+      const s = stream || video?.srcObject;
+      s?.getTracks?.().forEach(track => track.stop());
+    };
+
+    const handleCode = (code) => {
+      if (pausedRef.current) return;
+      const now = Date.now();
+      if (code === lastHit.code && now - lastHit.time < SCAN_COOLDOWN_MS) return;
+      lastHit.code = code;
+      lastHit.time = now;
+      playBeep();
+      setLastScan({ code, time: now });
+      callbacks.current.onScanSuccess?.(code);
+      if (!continuous) {
+        stopAll();
+        callbacks.current.onClose?.();
+      }
+    };
+
+    const tuneTrack = (activeStream) => {
+      const track = activeStream?.getVideoTracks?.()[0];
+      if (!track) return;
+      trackRef.current = track;
+      try {
+        const caps = track.getCapabilities?.();
+        if (caps?.torch) setTorchSupported(true);
+        if (caps?.focusMode?.includes?.('continuous')) {
+          track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+        }
+      } catch {}
+    };
+
+    // Engine 1: native BarcodeDetector (Chrome on Android) - hardware-accelerated, near-instant
+    const startNative = async (detector) => {
+      stream = await navigator.mediaDevices.getUserMedia(videoConstraints(selectedCameraId));
+      if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+      tuneTrack(stream);
+      const scheduleNext = () => {
+        if (cancelled) return;
+        if (video.requestVideoFrameCallback) {
+          frameHandle = video.requestVideoFrameCallback(loop);
+        } else {
+          timer = setTimeout(loop, 200);
+        }
+      };
+      const loop = async () => {
+        if (cancelled) return;
+        try {
+          const codes = await detector.detect(video);
+          if (!cancelled && codes && codes.length > 0 && codes[0].rawValue) {
+            handleCode(codes[0].rawValue);
+          }
+        } catch {}
+        scheduleNext();
+      };
+      scheduleNext();
+    };
+
+    // Engine 2: zxing fallback (iPhone Safari, older browsers)
+    const startZxing = async () => {
+      const hints = new Map();
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+        BarcodeFormat.EAN_13,
+        BarcodeFormat.EAN_8,
+        BarcodeFormat.UPC_A,
+        BarcodeFormat.UPC_E,
+        BarcodeFormat.CODE_128,
+        BarcodeFormat.CODE_39,
+        BarcodeFormat.ITF
+      ]);
+      hints.set(DecodeHintType.TRY_HARDER, true);
+      const reader = new BrowserMultiFormatReader(hints);
+      reader.timeBetweenDecodingAttempts = 150;
+      controls = await reader.decodeFromConstraints(videoConstraints(selectedCameraId), video, (result) => {
+        if (result && !cancelled) handleCode(result.getText());
+      });
+      if (cancelled || stopped) { controls.stop(); return; }
+      if (video.srcObject) tuneTrack(video.srcObject);
+    };
 
     async function startCamera() {
       setError(null);
+      setTorchSupported(false);
+      setTorchOn(false);
+      trackRef.current = null;
       if (!navigator.mediaDevices?.getUserMedia) {
         setError('Camera scanning requires HTTPS or localhost. You can enter the barcode manually.');
         return;
       }
       try {
-        const videoDevice = selectedCameraId
-          ? { deviceId: { exact: selectedCameraId } }
-          : { facingMode: { ideal: 'environment' } };
-        controls = await reader.decodeFromConstraints({ video: videoDevice, audio: false }, video, (result, _, scanControls) => {
-          if (!result || cancelled || scanned) return;
-          scanned = true;
-          scanControls.stop();
-          playBeep();
-          callbacks.current.onScanSuccess?.(result.getText());
-          callbacks.current.onClose?.();
-        });
-        if (cancelled || scanned) {
-          controls.stop();
-          return;
+        const detector = await getNativeDetector();
+        if (cancelled) return;
+        if (detector) {
+          await startNative(detector);
+        } else {
+          await startZxing();
         }
-        const devices = await BrowserMultiFormatReader.listVideoInputDevices();
-        if (!cancelled) setCameras(devices);
-      } catch (error) {
-        if (!cancelled) setError(error.name === 'NotAllowedError'
+        if (cancelled) return;
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (!cancelled) setCameras(devices.filter(d => d.kind === 'videoinput'));
+      } catch (err) {
+        stopAll();
+        if (!cancelled) setError(err?.name === 'NotAllowedError'
           ? 'Camera access was denied. Allow it in your browser or enter the barcode manually.'
           : 'The camera could not start. Check the selected camera or enter the barcode manually.');
       }
     }
 
     startCamera();
-    return () => {
-      cancelled = true;
-      controls?.stop();
-      video?.srcObject?.getTracks().forEach(track => track.stop());
-    };
-  }, [isOpen, selectedCameraId]);
+    return () => { stopAll(); };
+  }, [isOpen, selectedCameraId, continuous]);
+
+  // Fade the "scanned" confirmation chip after a moment in continuous mode
+  useEffect(() => {
+    if (!lastScan) return undefined;
+    const t = setTimeout(() => setLastScan(null), 2500);
+    return () => clearTimeout(t);
+  }, [lastScan]);
 
   if (!isOpen) return null;
 
@@ -84,7 +222,9 @@ export function CameraScannerModal({ isOpen, onClose, onScanSuccess }) {
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
           <div className="flex items-center gap-2">
             <Camera className="h-5 w-5 text-blue-400" />
-            <h3 className="font-semibold text-base">Scan Product Barcode</h3>
+            <h3 className="font-semibold text-base">
+              {continuous ? 'Scan Products (keep scanning)' : 'Scan Product Barcode'}
+            </h3>
           </div>
           <button
             type="button"
@@ -114,6 +254,16 @@ export function CameraScannerModal({ isOpen, onClose, onScanSuccess }) {
             </div>
           </div>
 
+          {/* Scan confirmation chip (continuous mode) */}
+          {continuous && lastScan && (
+            <div className="absolute top-3 inset-x-0 flex justify-center pointer-events-none">
+              <div className="flex items-center gap-1.5 bg-emerald-600/90 text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-lg">
+                <CheckCircle2 className="h-4 w-4" />
+                <span>Scanned {lastScan.code}</span>
+              </div>
+            </div>
+          )}
+
           {error && (
             <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center p-6 text-center">
               <AlertCircle className="h-10 w-10 text-red-500 mb-2" />
@@ -131,35 +281,47 @@ export function CameraScannerModal({ isOpen, onClose, onScanSuccess }) {
 
         {/* Controls & Camera Switcher */}
         <div className="p-4 bg-slate-950 flex flex-col gap-3">
-          {cameras.length > 1 && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-slate-400">Camera:</span>
-              <select
-                value={selectedCameraId}
-                onChange={event => setSelectedCameraId(event.target.value)}
-                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-200 text-xs focus:ring-1 focus:ring-blue-500"
+          <div className="flex items-center gap-2 text-xs">
+            {cameras.length > 1 && (
+              <>
+                <span className="text-slate-400">Camera:</span>
+                <select
+                  value={selectedCameraId}
+                  onChange={event => setSelectedCameraId(event.target.value)}
+                  className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-200 text-xs focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">Automatic</option>
+                  {cameras.map(c => (
+                    <option key={c.deviceId} value={c.deviceId}>
+                      {c.label || `Camera ${c.deviceId.slice(0, 5)}`}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+            {torchSupported && (
+              <button
+                type="button"
+                onClick={toggleTorch}
+                className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border ${torchOn ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-slate-900 text-slate-300 border-slate-700'}`}
               >
-                <option value="">Automatic</option>
-                {cameras.map(c => (
-                  <option key={c.deviceId} value={c.deviceId}>
-                    {c.label || `Camera ${c.deviceId.slice(0, 5)}`}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+                {torchOn ? <FlashlightOff className="h-4 w-4" /> : <Flashlight className="h-4 w-4" />}
+                <span>{torchOn ? 'Torch on' : 'Torch'}</span>
+              </button>
+            )}
+          </div>
 
           <div className="flex items-center justify-between text-xs text-slate-400">
             <div className="flex items-center gap-1.5">
               <Volume2 className="h-4 w-4 text-emerald-400" />
-              <span>Audio feedback enabled</span>
+              <span>{continuous ? 'Beeps on every scan' : 'Audio feedback enabled'}</span>
             </div>
             <button
               type="button"
               onClick={onClose}
               className="text-xs text-slate-400 hover:text-white underline"
             >
-              Cancel
+              {continuous ? 'Done scanning' : 'Cancel'}
             </button>
           </div>
         </div>
