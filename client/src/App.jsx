@@ -88,8 +88,8 @@ export function App() {
     <AuthProvider>
       <CartProvider>
         <BrowserRouter>
+          <Suspense fallback={pageFallback}>
           <Routes>
-            <Suspense fallback={pageFallback}>
             {/* Public Auth Routes */}
             <Route element={<AuthLayout />}>
               <Route path="/login" element={<LoginPage />} />
@@ -141,8 +141,8 @@ export function App() {
 
             {/* Default Redirection */}
             <Route path="*" element={<Navigate to="/pos" replace />} />
-            </Suspense>
           </Routes>
+          </Suspense>
         </BrowserRouter>
       </CartProvider>
     </AuthProvider>
