@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { Store, LogIn, AlertCircle, Eye, EyeOff, ShieldCheck, UserCheck, ArrowRight } from 'lucide-react';
+import { Store, LogIn, AlertCircle, Eye, EyeOff, UserCheck, ArrowRight } from 'lucide-react';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
@@ -9,6 +9,7 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [showForgotHelp, setShowForgotHelp] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -76,7 +77,11 @@ export function LoginPage() {
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className="block text-sm font-medium text-txt">Password</label>
-            <button type="button" className="text-xs font-medium text-action hover:text-action-hover">
+            <button
+              type="button"
+              onClick={() => setShowForgotHelp((v) => !v)}
+              className="text-xs font-medium text-action hover:text-action-hover"
+            >
               Forgot password?
             </button>
           </div>
@@ -119,6 +124,12 @@ export function LoginPage() {
         </button>
       </form>
 
+      {showForgotHelp && (
+        <div className="mt-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-slate-700">
+          For security, passwords can only be reset by your shop owner (for staff) or by platform support (for shop owners).
+        </div>
+      )}
+
       {/* Demo Quick Access */}
       <div className="mt-8 pt-6 border-t border-border">
         <p className="text-xs font-semibold text-txt-secondary uppercase tracking-wider mb-3">
@@ -128,7 +139,6 @@ export function LoginPage() {
           {[
             { label: 'Shop Owner', sub: 'Full access', email: 'ramesh@kirana.local', password: 'Owner@123456', icon: Store, color: 'text-action' },
             { label: 'Cashier', sub: 'Billing only', email: 'suresh@kirana.local', password: 'Cashier@123456', icon: UserCheck, color: 'text-success' },
-            { label: 'Super Admin', sub: 'Platform admin', email: 'admin@retailpos.local', password: 'Admin@123456', icon: ShieldCheck, color: 'text-purple-600' },
           ].map(({ label, sub, email: dEmail, password: dPass, icon: Icon, color }) => (
             <button
               key={label}

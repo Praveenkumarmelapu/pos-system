@@ -21,7 +21,6 @@ import {
   ChevronRight,
   TrendingUp,
   Truck,
-  BarChart3,
   Bell,
   Search,
   Tag,
@@ -46,12 +45,6 @@ const NAV_SECTIONS = [
     items: [
       { to: '/customers', label: 'Customers', icon: Users },
       { to: '/khata', label: 'Khata / Udhaar', icon: Wallet },
-    ],
-  },
-  {
-    label: 'ANALYTICS',
-    items: [
-      { to: '/reports', label: 'Reports', icon: BarChart3 },
     ],
   },
   {
@@ -163,7 +156,7 @@ function SidebarContent({ user, activeShop, isSuperAdmin, logout, cartCount, col
           {!collapsed && (
             <div className="flex-1 min-w-0">
               <div className="text-[12px] font-semibold text-slate-300 truncate">{user?.name}</div>
-              <div className="text-[10px] text-slate-600 capitalize">{activeShop?.role || 'Cashier'}</div>
+              <div className="text-[10px] text-slate-600 capitalize">{activeShop?.role || (isSuperAdmin ? 'Platform Admin' : 'Cashier')}</div>
             </div>
           )}
           {!collapsed && (
