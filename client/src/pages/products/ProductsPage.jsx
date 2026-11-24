@@ -132,7 +132,7 @@ export function ProductsPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           {/* View Mode Toggle: Grid vs Table */}
           <div className="flex items-center p-1 bg-white border border-slate-200/80 rounded-xl shadow-xs">
             <button
