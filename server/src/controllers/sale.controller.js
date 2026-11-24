@@ -1,16 +1,18 @@
+import crypto from 'node:crypto';
 import { Sale } from '../models/Sale.js';
 import { Product } from '../models/Product.js';
 import { StockMovement } from '../models/StockMovement.js';
 import { Customer } from '../models/Customer.js';
 import { CustomerLedgerEntry } from '../models/CustomerLedgerEntry.js';
 import { AuditLog } from '../models/AuditLog.js';
+import { CustomerPayment } from '../models/CustomerPayment.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { rupeesToPaise } from '../utils/money.js';
 import { createSaleSchema, createReturnSchema } from '../validators/sale.validator.js';
 
-function formatInvoiceNumber(count) {
-  const now = new Date();
-  const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+export function formatInvoiceNumber(count, date = new Date()) {
+  const yearMonthParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit' }).formatToParts(date);
+  const yearMonth = `${yearMonthParts.find((part) => part.type === 'year')?.value}${yearMonthParts.find((part) => part.type === 'month')?.value}`;
   const seq = String(count + 1).padStart(5, '0');
   return `INV-${yearMonth}-${seq}`;
 }
@@ -143,8 +145,14 @@ export async function createSale(req, res, next) {
     };
 
     // 4. Generate Sequential Invoice Number
-    const salesCount = await Sale.countDocuments({ shopId });
-    const invoiceNumber = formatInvoiceNumber(salesCount);
+    const now = new Date();
+    const istParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit' }).formatToParts(now);
+    const invoiceYear = Number(istParts.find((part) => part.type === 'year')?.value);
+    const invoiceMonth = Number(istParts.find((part) => part.type === 'month')?.value);
+    const invoiceMonthStart = new Date(Date.UTC(invoiceYear, invoiceMonth - 1, 1) - (5 * 60 + 30) * 60 * 1000);
+    const invoiceMonthEnd = new Date(Date.UTC(invoiceYear, invoiceMonth, 1) - (5 * 60 + 30) * 60 * 1000);
+    const salesCount = await Sale.countDocuments({ shopId, saleDate: { $gte: invoiceMonthStart, $lt: invoiceMonthEnd } });
+    const invoiceNumber = formatInvoiceNumber(salesCount, invoiceMonthStart);
 
     // 5. Decrement Stock Quantities Atomically
     const stockBulkOps = saleItems.map(item => ({
@@ -252,6 +260,205 @@ export async function createSale(req, res, next) {
   } catch (err) {
     next(err);
   }
+}
+
+
+
+function archiveCutoffFromInput(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit' }).formatToParts(new Date());
+  const currentMonth = `${parts.find((part) => part.type === 'year')?.value}-${parts.find((part) => part.type === 'month')?.value}`;
+  if (value.slice(0, 7) >= currentMonth) return null;
+  return new Date(Date.UTC(year, month - 1, day) - (5 * 60 + 30) * 60 * 1000);
+}
+
+function archiveEligibleDigest(ids) {
+  return crypto.createHash('sha256').update([...ids].map(String).sort().join(',')).digest('hex');
+}
+
+function signArchiveToken(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto.createHmac('sha256', process.env.JWT_SECRET || 'fallback_secret_for_local_dev_only').update(body).digest('base64url');
+  return `${body}.${signature}`;
+}
+
+function verifyArchiveToken(token) {
+  if (typeof token !== 'string') return null;
+  const [body, signature] = token.split('.');
+  if (!body || !signature) return null;
+  const expected = crypto.createHmac('sha256', process.env.JWT_SECRET || 'fallback_secret_for_local_dev_only').update(body).digest();
+  let actual;
+  try { actual = Buffer.from(signature, 'base64url'); } catch { return null; }
+  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    return payload.exp > Date.now() ? payload : null;
+  } catch { return null; }
+}
+
+function archiveBoundaryFilter(boundary) {
+  if (!boundary?.createdAt || !boundary?._id) return { _id: { $exists: false } };
+  const createdAt = new Date(boundary.createdAt);
+  return { $or: [{ createdAt: { $lt: createdAt } }, { createdAt, _id: { $lte: boundary._id } }] };
+}
+
+function archiveAfterFilter(cursor) {
+  if (!cursor?.createdAt || !cursor?._id) return null;
+  const createdAt = new Date(cursor.createdAt);
+  return { $or: [{ createdAt: { $gt: createdAt } }, { createdAt, _id: { $gt: cursor._id } }] };
+}
+
+function withArchiveBoundary(query, boundary) {
+  return { ...query, $and: [...(query.$and || []), archiveBoundaryFilter(boundary)] };
+}
+
+async function getSalesSnapshotDigest(shopId, boundary) {
+  const query = withArchiveBoundary({ shopId }, boundary);
+  const hash = crypto.createHash('sha256');
+  let count = 0;
+  const cursor = Sale.find(query).sort({ createdAt: 1, _id: 1 }).lean().cursor();
+  for await (const record of cursor) {
+    hash.update(JSON.stringify(record));
+    hash.update('\n');
+    count += 1;
+  }
+  return { count, digest: hash.digest('hex') };
+}
+
+async function getOldSalesForArchive(shopId, cutoff, boundary) {
+  const query = withArchiveBoundary({ shopId, saleDate: { $lt: cutoff } }, boundary);
+  const sales = await Sale.find(query)
+    .select('_id customerId isKhata creditAmount refundTotal status returns createdAt updatedAt')
+    .lean();
+  if (!sales.length) return { total: 0, eligibleIds: [] };
+  const candidateIds = sales
+    .filter((sale) => !sale.customerId && !sale.isKhata && !(sale.creditAmount > 0) && !(sale.refundTotal > 0) && !(sale.returns || []).length && !['returned', 'partially_returned', 'cancelled'].includes(sale.status))
+    .map((sale) => sale._id);
+  if (!candidateIds.length) return { total: sales.length, eligibleIds: [], eligibleSales: [] };
+  const [ledgerRefs, paymentRefs] = await Promise.all([
+    CustomerLedgerEntry.distinct('saleId', { shopId, saleId: { $in: candidateIds } }),
+    CustomerPayment.distinct('saleId', { shopId, saleId: { $in: candidateIds } })
+  ]);
+  const protectedIds = new Set([...ledgerRefs, ...paymentRefs].map(String));
+  const eligibleSales = sales.filter((sale) => candidateIds.some((id) => String(id) === String(sale._id)) && !protectedIds.has(String(sale._id)));
+  return { total: sales.length, eligibleIds: eligibleSales.map((sale) => sale._id), eligibleSales };
+}
+
+async function getArchiveBoundary(shopId) {
+  const maxDoc = await Sale.findOne({ shopId }).sort({ createdAt: -1, _id: -1 }).select('_id createdAt').lean();
+  return maxDoc ? { _id: String(maxDoc._id), createdAt: maxDoc.createdAt.toISOString() } : null;
+}
+
+export async function previewOldSalesArchive(req, res, next) {
+  try {
+    const cutoff = archiveCutoffFromInput(req.query.beforeDate);
+    if (!cutoff) return sendError(res, 'Choose a valid date before the current month. Current-month bills cannot be cleared.', 400, 'INVALID_ARCHIVE_DATE');
+    const shopId = req.tenant.shopId;
+    const boundary = await getArchiveBoundary(shopId);
+    const totalAll = boundary ? await Sale.countDocuments(withArchiveBoundary({ shopId }, boundary)) : 0;
+    const { total, eligibleIds } = await getOldSalesForArchive(shopId, cutoff, boundary);
+    return sendSuccess(res, { beforeDate: req.query.beforeDate, totalAll, boundary, total, eligible: eligibleIds.length, protected: total - eligibleIds.length }, 'Old bill archive preview ready', 200);
+  } catch (err) { next(err); }
+}
+
+export async function exportOldSalesArchive(req, res, next) {
+  try {
+    const shopId = req.tenant.shopId;
+    const pageSize = 300;
+    let payload;
+    if (req.body?.exportToken) {
+      payload = verifyArchiveToken(req.body.exportToken);
+      if (!payload || payload.shopId !== shopId) return sendError(res, 'The export session expired or is invalid. Start the export again.', 400, 'INVALID_EXPORT_SESSION');
+    } else {
+      const cutoff = archiveCutoffFromInput(req.body?.beforeDate);
+      if (!cutoff) return sendError(res, 'Choose a valid date before the current month. Current-month bills cannot be cleared.', 400, 'INVALID_ARCHIVE_DATE');
+      const boundary = await getArchiveBoundary(shopId);
+      const [{ count: totalAll, digest: snapshotDigest }, { total, eligibleIds }] = await Promise.all([
+        boundary ? getSalesSnapshotDigest(shopId, boundary) : Promise.resolve({ count: 0, digest: crypto.createHash('sha256').digest('hex') }),
+        getOldSalesForArchive(shopId, cutoff, boundary)
+      ]);
+      payload = {
+        shopId,
+        beforeDate: req.body.beforeDate,
+        boundary,
+        totalAll,
+        totalOld: total,
+        snapshotDigest,
+        eligible: eligibleIds.length,
+        eligibleDigest: archiveEligibleDigest(eligibleIds),
+        exp: Date.now() + 30 * 60 * 1000
+      };
+    }
+    let query = withArchiveBoundary({ shopId }, payload.boundary);
+    const after = archiveAfterFilter(req.body?.after);
+    if (after) query = { ...query, $and: [...query.$and, after] };
+    const records = await Sale.find(query).sort({ createdAt: 1, _id: 1 }).limit(pageSize).lean();
+    const afterCursor = records.length ? { _id: String(records[records.length - 1]._id), createdAt: records[records.length - 1].createdAt.toISOString() } : null;
+    const exportToken = signArchiveToken(payload);
+    const nextQuery = afterCursor ? { ...withArchiveBoundary({ shopId }, payload.boundary), $and: [...withArchiveBoundary({ shopId }, payload.boundary).$and, archiveAfterFilter(afterCursor)] } : null;
+    const hasMore = Boolean(nextQuery && await Sale.exists(nextQuery));
+    return sendSuccess(res, {
+      shopId: payload.shopId,
+      beforeDate: payload.beforeDate,
+      totalAll: payload.totalAll,
+      totalOld: payload.totalOld,
+      eligible: payload.eligible,
+      protected: payload.totalOld - payload.eligible,
+      pageSize,
+      records,
+      after: afterCursor,
+      hasMore,
+      exportToken
+    }, 'Full-fidelity bill export page ready', 200);
+  } catch (err) { next(err); }
+}
+
+export async function clearOldSalesArchive(req, res, next) {
+  try {
+    const payload = verifyArchiveToken(req.body?.exportToken);
+    if (!payload || payload.shopId !== req.tenant.shopId) return sendError(res, 'The export verification expired or is invalid. Export the bills again before clearing.', 400, 'INVALID_EXPORT_VERIFICATION');
+    const cutoff = archiveCutoffFromInput(payload.beforeDate);
+    if (!cutoff) return sendError(res, 'Choose a valid date before the current month. Current-month bills cannot be cleared.', 400, 'INVALID_ARCHIVE_DATE');
+    const boundary = payload.boundary || null;
+    const [{ count: currentCount, digest: currentDigest }, { total, eligibleIds, eligibleSales }] = await Promise.all([
+      boundary ? getSalesSnapshotDigest(req.tenant.shopId, boundary) : Promise.resolve({ count: 0, digest: crypto.createHash('sha256').digest('hex') }),
+      getOldSalesForArchive(req.tenant.shopId, cutoff, boundary)
+    ]);
+    if (currentCount !== payload.totalAll || currentDigest !== payload.snapshotDigest || total !== payload.totalOld || eligibleIds.length !== payload.eligible || archiveEligibleDigest(eligibleIds) !== payload.eligibleDigest) {
+      return sendError(res, 'Bills changed since export. Nothing was cleared. Run a new preview and export.', 409, 'ARCHIVE_EXPORT_STALE');
+    }
+    if (!eligibleIds.length) return sendSuccess(res, { deleted: 0, protected: total }, 'No eligible old bills to clear; protected records remain.', 200);
+    const deleteResult = await Sale.bulkWrite(eligibleSales.map((sale) => ({
+      deleteOne: {
+        filter: {
+          _id: sale._id,
+          shopId: req.tenant.shopId,
+          saleDate: { $lt: cutoff },
+          customerId: null,
+          isKhata: { $ne: true },
+          status: { $nin: ['returned', 'partially_returned', 'cancelled'] },
+          ...(sale.updatedAt ? { updatedAt: sale.updatedAt } : { updatedAt: { $exists: false } }),
+          $and: [
+            { $or: [{ creditAmount: { $lte: 0 } }, { creditAmount: { $exists: false } }] },
+            { $or: [{ refundTotal: { $lte: 0 } }, { refundTotal: { $exists: false } }] },
+            { $or: [{ returns: { $size: 0 } }, { returns: { $exists: false } }] }
+          ]
+        }
+      }
+    })));
+    const result = { deletedCount: deleteResult.deletedCount };
+    await AuditLog.create({
+      shopId: req.tenant.shopId,
+      userId: req.user._id,
+      action: 'sale:archive-cleared',
+      resourceType: 'sale',
+      details: { beforeDate: payload.beforeDate, deletedCount: result.deletedCount, expectedEligibleCount: eligibleIds.length, protectedCount: total - result.deletedCount, eligibleDigest: payload.eligibleDigest }
+    });
+    return sendSuccess(res, { deleted: result.deletedCount, protected: total - result.deletedCount, expectedEligible: eligibleIds.length, beforeDate: payload.beforeDate }, result.deletedCount === eligibleIds.length ? 'Verified old bills cleared. Customer, credit, and return history was kept.' : 'Some bills changed during clearing and were kept for safety. Refresh the report to review.', 200);
+  } catch (err) { next(err); }
 }
 
 export async function getSales(req, res, next) {

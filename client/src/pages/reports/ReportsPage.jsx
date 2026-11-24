@@ -37,6 +37,14 @@ export function ReportsPage() {
   const [gstData, setGstData] = useState(null);
   const [gstLoading, setGstLoading] = useState(false);
   const [gstError, setGstError] = useState('');
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveDate, setArchiveDate] = useState('');
+  const [archivePreview, setArchivePreview] = useState(null);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [archiveError, setArchiveError] = useState('');
+  const [archiveMessage, setArchiveMessage] = useState('');
+  const [archiveFileReady, setArchiveFileReady] = useState(false);
+  const [archiveBackupConfirmed, setArchiveBackupConfirmed] = useState(false);
   const { activeShop } = useAuth();
 
   const loadSales = async () => {
@@ -56,6 +64,89 @@ export function ReportsPage() {
   useEffect(() => {
     loadSales();
   }, []);
+
+  const exportAllBillsAndPrepareClear = async () => {
+    setArchiveLoading(true);
+    setArchiveError('');
+    setArchiveMessage('');
+    setArchiveFileReady(false);
+    setArchiveBackupConfirmed(false);
+    try {
+      const preview = await api.get('/sales/archive/preview', { params: { beforeDate: archiveDate } }).then((response) => response.data.data);
+      const allBills = [];
+      let exportToken = null;
+      let after = null;
+      let summary = preview;
+      while (true) {
+        const response = await api.post('/sales/archive/export', after
+          ? { exportToken, after }
+          : { beforeDate: archiveDate });
+        const data = response.data.data;
+        summary = data;
+        exportToken = data.exportToken;
+        allBills.push(...data.records);
+        after = data.after;
+        if (!data.hasMore) break;
+        if (!after) throw new Error('Export paging stopped unexpectedly. No file was prepared for clearing.');
+      }
+      if (summary.totalAll !== preview.totalAll || summary.totalOld !== preview.total || summary.eligible !== preview.eligible || summary.protected !== preview.protected) {
+        throw new Error('Bills changed since the preview. No file was prepared for clearing. Refresh the preview and try again.');
+      }
+      const unique = new Set(allBills.map((bill) => String(bill._id)));
+      const hasOutOfScopeRow = allBills.some((bill) => bill.shopId !== summary.shopId);
+      if (unique.size !== allBills.length || hasOutOfScopeRow || allBills.length !== summary.totalAll) {
+        throw new Error(`Export verification failed. Expected ${summary.totalAll} bills and found ${unique.size} unique in-scope rows. Nothing was cleared.`);
+      }
+      const columns = [
+        { key: '_id', label: 'Sale ID' }, { key: 'shopId', label: 'Shop ID' },
+        { key: 'invoiceNumber', label: 'Invoice #' }, { key: 'idempotencyKey', label: 'Idempotency Key' }, { key: 'saleDate', label: 'Date' },
+        { key: 'status', label: 'Status' }, { key: 'customerId', label: 'Customer ID' },
+        { key: 'customerName', label: 'Customer' }, { key: 'customerPhone', label: 'Customer Phone' },
+        { key: 'cashierId', label: 'Cashier ID' }, { key: 'cashierName', label: 'Cashier' },
+        { key: 'paymentMethod', label: 'Payment Mode' }, { key: 'isKhata', label: 'Is Khata' }, { key: 'paymentBreakdown', label: 'Payment Breakdown', value: (bill) => JSON.stringify(bill.paymentBreakdown || {}) },
+        { key: 'items', label: 'Item Lines', value: (bill) => JSON.stringify(bill.items || []) },
+        { key: 'returns', label: 'Return Lines', value: (bill) => JSON.stringify(bill.returns || []) },
+        { key: 'subtotal', label: 'Subtotal (paise)' }, { key: 'totalDiscount', label: 'Discount (paise)' },
+        { key: 'totalTax', label: 'GST (paise)' }, { key: 'roundingAdjustment', label: 'Rounding Adjustment (paise)' }, { key: 'grandTotal', label: 'Grand Total (paise)' },
+        { key: 'refundTotal', label: 'Refund Total (paise)' }, { key: 'creditAmount', label: 'Credit (paise)' },
+        { key: 'paidAmount', label: 'Paid (paise)' }, { key: 'totalCost', label: 'Cost (paise)' },
+        { key: 'paymentDetails', label: 'Payment Details', value: (bill) => JSON.stringify(bill.paymentDetails || {}) },
+        { key: 'notes', label: 'Notes' }, { key: 'createdAt', label: 'Created At' }, { key: 'updatedAt', label: 'Updated At' }
+      ];
+      const csv = toCsv(allBills, columns);
+      const filename = `bills-full-export-${archiveDate}-through-${new Date().toISOString().slice(0, 10)}.csv`;
+      downloadCsv(filename, csv);
+      setArchivePreview({ ...summary, ...preview, exported: allBills.length, exportToken, verifiedIds: [...unique] });
+      setArchiveFileReady(true);
+      setArchiveBackupConfirmed(false);
+      setArchiveMessage(`Verified ${allBills.length} unique bill records. The full CSV download has started. Save the file before checking the backup box.`);
+    } catch (err) {
+      setArchiveError(err.response?.data?.error?.message || err.message || 'Could not prepare and verify the full export.');
+      setArchivePreview(null);
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
+
+  const clearVerifiedOldBills = async () => {
+    if (!archivePreview?.exportToken || !archiveFileReady || !archiveBackupConfirmed) return;
+    const confirmed = window.confirm(`Delete ${archivePreview.eligible} eligible bill records dated before ${archiveDate}? ${archivePreview.protected} bills with customer, credit, or return history will be kept. This cannot be undone.`);
+    if (!confirmed) return;
+    setArchiveLoading(true);
+    setArchiveError('');
+    setArchiveMessage('');
+    try {
+      const res = await api.post('/sales/archive/clear', { exportToken: archivePreview.exportToken });
+      setArchiveMessage(`Done. Cleared ${res.data.data.deleted} eligible bills. Kept ${res.data.data.protected} protected bills.`);
+      setArchivePreview(null);
+      setArchiveFileReady(false);
+      await loadSales();
+    } catch (err) {
+      setArchiveError(err.response?.data?.error?.message || 'Bills were not cleared. Refresh the preview and export again.');
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
 
   const handlePrintReceipt = (sale) => {
     setSelectedSale(sale);
@@ -151,6 +242,16 @@ export function ReportsPage() {
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto">
+          {activeTab === 'invoices' && activeShop?.role === 'owner' && (
+            <button
+              onClick={() => { setArchiveOpen(true); setArchiveDate(''); setArchivePreview(null); setArchiveError(''); setArchiveMessage(''); setArchiveFileReady(false); setArchiveBackupConfirmed(false); }}
+              className="px-3 py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-sm"
+              title="Export complete bill history and safely clear eligible old bills"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              <span>Export & Clear Old Bills</span>
+            </button>
+          )}
           {activeTab === 'invoices' && (
             <button
               onClick={exportSalesCsv}
@@ -396,6 +497,65 @@ export function ReportsPage() {
       </div>
 
       </>)}
+
+
+      {archiveOpen && activeShop?.role === 'owner' && (
+        <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-3" role="dialog" aria-modal="true" aria-labelledby="archive-title">
+          <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl shadow-2xl p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 id="archive-title" className="text-lg font-bold text-slate-900">Export all bills and clear old bills</h3>
+                <p className="mt-1 text-xs text-slate-600">Choose a cutoff date. Bills dated before that day are eligible, subject to the protections below. Current-month bills are protected.</p>
+              </div>
+              <button type="button" onClick={() => setArchiveOpen(false)} className="px-3 py-2 text-sm border rounded-lg">Close</button>
+            </div>
+            <label className="block text-sm font-semibold text-slate-700">
+              Clear bills dated before
+              <input type="date" value={archiveDate} onChange={(event) => { setArchiveDate(event.target.value); setArchivePreview(null); setArchiveFileReady(false); setArchiveMessage(''); setArchiveError(''); }} className="mt-1 block w-full rounded-lg border border-slate-300 p-3 text-base" />
+            </label>
+            {archiveError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{archiveError}</p>}
+            {archiveMessage && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{archiveMessage}</p>}
+            {archivePreview && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-1 text-sm">
+                <p><strong>All bills in this shop:</strong> {archivePreview.totalAll}</p>
+                <p><strong>Old bills before cutoff:</strong> {archivePreview.totalOld}</p>
+                <p><strong>Eligible to clear:</strong> {archivePreview.eligible}</p>
+                <p><strong>Protected and kept:</strong> {archivePreview.protected}</p>
+                {archiveFileReady && <p><strong>Export verified:</strong> {archivePreview.exported} unique records</p>}
+                <p className="pt-1 text-xs text-slate-600">This full-detail CSV includes all bills in the shop, with each item line and return/refund detail. The cutoff is only for deciding which bills may be cleared. Download it and keep a backup before confirming. Bills with customer/ledger, credit, or return history are protected, and stock-movement history is kept.</p>
+              </div>
+            )}
+            {!archivePreview ? (
+              <button type="button" disabled={!archiveDate || archiveLoading} onClick={async () => {
+                setArchiveLoading(true); setArchiveError(''); setArchiveMessage(''); setArchiveFileReady(false); setArchiveBackupConfirmed(false);
+                try {
+                  const response = await api.get('/sales/archive/preview', { params: { beforeDate: archiveDate } });
+                  setArchivePreview(response.data.data);
+                } catch (err) {
+                  setArchiveError(err.response?.data?.error?.message || 'Could not load the preview.');
+                } finally { setArchiveLoading(false); }
+              }} className="w-full rounded-xl bg-blue-700 px-4 py-3 font-bold text-white disabled:opacity-50">
+                {archiveLoading ? 'Checking bills...' : 'Preview bill counts'}
+              </button>
+            ) : !archiveFileReady ? (
+              <button type="button" disabled={archiveLoading} onClick={exportAllBillsAndPrepareClear} className="w-full rounded-xl bg-blue-700 px-4 py-3 font-bold text-white disabled:opacity-50">
+                {archiveLoading ? 'Exporting and verifying all bills...' : 'Download and verify full backup'}
+              </button>
+            ) : (
+              <>
+                <label className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                  <input type="checkbox" checked={archiveBackupConfirmed} onChange={(event) => setArchiveBackupConfirmed(event.target.checked)} className="mt-1 h-5 w-5" />
+                  <span>I saved the downloaded CSV backup and understand clearing cannot be undone.</span>
+                </label>
+                <button type="button" disabled={!archiveBackupConfirmed || archiveLoading || archivePreview.eligible === 0} onClick={clearVerifiedOldBills} className="w-full rounded-xl bg-rose-700 px-4 py-3 font-bold text-white disabled:opacity-50">
+                  {archiveLoading ? 'Working...' : `Clear ${archivePreview.eligible} eligible old bills`}
+                </button>
+              </>
+            )}
+            <p className="text-[11px] text-slate-500">Three safeguards: see the counts first, download and verify the CSV, confirm you saved it, then separately confirm deletion. If records change after export, the clear step stops.</p>
+          </div>
+        </div>
+      )}
 
       <ReceiptModal
         isOpen={receiptOpen}

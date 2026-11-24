@@ -86,7 +86,7 @@ describe('Intelligent Supermarket Product Categorization & Barcode Registration 
     expect(res.body.success).toBe(true);
     expect(res.body.data.found).toBe(true);
     expect(res.body.data.product.category).toBe('Instant & Ready-to-Cook Food');
-    expect(res.body.data.product.subCategory).toBe('Noodles');
+    expect(res.body.data.product.subCategory).toBe('Instant Noodles & Ramen');
     expect(res.body.data.product.classificationStatus).toBe('auto_assigned');
   });
 
