@@ -26,6 +26,33 @@
   }
   /* Page title */
   .page-title {
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    @apply bg-surface text-txt antialiased;
+  }
+  /* Consistent focus rings */
+  *:focus-visible {
+    @apply outline-2 outline-offset-2 outline-action;
+  }
+}
+
+@layer components {
+  /* Page container */
+  .page-container {
+    @apply p-4 sm:p-6 max-w-[1600px] mx-auto;
+  }
+  /* Page title */
+  .page-title {
     @apply text-lg sm:text-xl font-bold text-txt;
   }
   /* Section heading */
@@ -130,5 +157,16 @@
   @page {
     margin: 0;
     size: auto;
+  }
+}
+
+/* Keep page controls comfortable on touch screens without changing desktop sizing. */
+@media (max-width: 639px) {
+  .touch-controls button,
+  .touch-controls a,
+  .touch-controls input,
+  .touch-controls select {
+    min-width: 40px;
+    min-height: 40px;
   }
 }
