@@ -106,7 +106,7 @@ export function InventoryPage() {
   });
 
   return (
-    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6 font-sans">
+    <div className="touch-controls p-4 sm:p-6 max-w-7xl mx-auto space-y-6 font-sans">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -130,7 +130,7 @@ export function InventoryPage() {
 
           <button
             onClick={loadData}
-            className="p-2.5 border border-slate-200 bg-white rounded-xl text-slate-600 hover:bg-slate-50 shadow-xs"
+            className="p-2.5 border border-slate-200 bg-white rounded-xl text-slate-600 hover:bg-slate-50 shadow-xs inline-flex items-center justify-center"
             title="Refresh Data"
           >
             <RefreshCw className="h-4 w-4" />
@@ -139,7 +139,7 @@ export function InventoryPage() {
       </div>
 
       {/* Tabs Switcher: Current Stock vs Movement Audit Log */}
-      <div className="flex items-center gap-2 border-b border-slate-200">
+      <div className="flex items-center gap-2 border-b border-slate-200 overflow-x-auto">
         <button
           onClick={() => setActiveTab('stock')}
           className={`pb-3 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-2 ${
