@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
@@ -7,22 +7,31 @@ import { AuthLayout } from './layouts/AuthLayout';
 import { LoginPage } from './pages/auth/LoginPage';
 import { RegisterPage } from './pages/auth/RegisterPage';
 import { BillingPage } from './pages/billing/BillingPage';
-import { DashboardPage } from './pages/dashboard/DashboardPage';
-import { ProductsPage } from './pages/products/ProductsPage';
-import { AddProductPage } from './pages/products/AddProductPage';
-import { ProductDetailPage } from './pages/products/ProductDetailPage';
-import { BulkLabelPage } from './pages/products/BulkLabelPage';
-import { CategoriesPage } from './pages/categories/CategoriesPage';
-import { InventoryPage } from './pages/inventory/InventoryPage';
-import { ReportsPage } from './pages/reports/ReportsPage';
-import { CustomersPage } from './pages/customers/CustomersPage';
-import { EmployeesPage } from './pages/employees/EmployeesPage';
-import { SettingsPage } from './pages/settings/SettingsPage';
-import { SuperAdminPage } from './pages/admin/SuperAdminPage';
-import { OnboardingWizardPage } from './pages/onboarding/OnboardingWizardPage';
-import { HardwarePage } from './pages/hardware/HardwarePage';
-import { KhataDashboardPage } from './pages/khata/KhataDashboardPage';
-import { CustomerLedgerPage } from './pages/khata/CustomerLedgerPage';
+
+// Lazy-load everything outside the core billing flow so the first load
+// downloads a much smaller bundle (recharts, zxing, jsbarcode stay out).
+const DashboardPage = lazy(() => import('./pages/dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const ProductsPage = lazy(() => import('./pages/products/ProductsPage').then(m => ({ default: m.ProductsPage })));
+const AddProductPage = lazy(() => import('./pages/products/AddProductPage').then(m => ({ default: m.AddProductPage })));
+const ProductDetailPage = lazy(() => import('./pages/products/ProductDetailPage').then(m => ({ default: m.ProductDetailPage })));
+const BulkLabelPage = lazy(() => import('./pages/products/BulkLabelPage').then(m => ({ default: m.BulkLabelPage })));
+const CategoriesPage = lazy(() => import('./pages/categories/CategoriesPage').then(m => ({ default: m.CategoriesPage })));
+const InventoryPage = lazy(() => import('./pages/inventory/InventoryPage').then(m => ({ default: m.InventoryPage })));
+const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then(m => ({ default: m.ReportsPage })));
+const CustomersPage = lazy(() => import('./pages/customers/CustomersPage').then(m => ({ default: m.CustomersPage })));
+const EmployeesPage = lazy(() => import('./pages/employees/EmployeesPage').then(m => ({ default: m.EmployeesPage })));
+const SettingsPage = lazy(() => import('./pages/settings/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const SuperAdminPage = lazy(() => import('./pages/admin/SuperAdminPage').then(m => ({ default: m.SuperAdminPage })));
+const OnboardingWizardPage = lazy(() => import('./pages/onboarding/OnboardingWizardPage').then(m => ({ default: m.OnboardingWizardPage })));
+const HardwarePage = lazy(() => import('./pages/hardware/HardwarePage').then(m => ({ default: m.HardwarePage })));
+const KhataDashboardPage = lazy(() => import('./pages/khata/KhataDashboardPage').then(m => ({ default: m.KhataDashboardPage })));
+const CustomerLedgerPage = lazy(() => import('./pages/khata/CustomerLedgerPage').then(m => ({ default: m.CustomerLedgerPage })));
+
+const pageFallback = (
+  <div className="h-screen w-screen flex items-center justify-center bg-slate-50 text-slate-500 text-xs font-semibold">
+    Loading...
+  </div>
+);
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, isSuperAdmin, activeShop, loading, logout, refreshSession } = useAuth();
@@ -80,6 +89,7 @@ export function App() {
       <CartProvider>
         <BrowserRouter>
           <Routes>
+            <Suspense fallback={pageFallback}>
             {/* Public Auth Routes */}
             <Route element={<AuthLayout />}>
               <Route path="/login" element={<LoginPage />} />
@@ -131,6 +141,7 @@ export function App() {
 
             {/* Default Redirection */}
             <Route path="*" element={<Navigate to="/pos" replace />} />
+            </Suspense>
           </Routes>
         </BrowserRouter>
       </CartProvider>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import JsBarcode from 'jsbarcode';
 import {
@@ -26,7 +26,7 @@ import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import { ProductImage } from '../../components/ui/ProductImage';
 import { StockBadge } from '../../components/ui/StockBadge';
 import { MetricCard } from '../../components/ui/MetricCard';
-import { BarcodeLabelModal } from '../../components/BarcodeLabelModal';
+const BarcodeLabelModal = lazy(() => import('../../components/BarcodeLabelModal').then(m => ({ default: m.BarcodeLabelModal })));
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
 
 export function ProductDetailPage() {
@@ -504,11 +504,15 @@ export function ProductDetailPage() {
       )}
 
       {/* Barcode Label Modal */}
-      <BarcodeLabelModal
-        isOpen={labelModalOpen}
-        onClose={() => setLabelModalOpen(false)}
-        product={product}
-      />
+      {labelModalOpen && (
+        <Suspense fallback={null}>
+          <BarcodeLabelModal
+            isOpen={labelModalOpen}
+            onClose={() => setLabelModalOpen(false)}
+            product={product}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

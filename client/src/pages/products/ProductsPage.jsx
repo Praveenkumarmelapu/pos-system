@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Package,
@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { ProductFormModal } from '../../components/ProductFormModal';
-import { BarcodeLabelModal } from '../../components/BarcodeLabelModal';
+const BarcodeLabelModal = lazy(() => import('../../components/BarcodeLabelModal').then(m => ({ default: m.BarcodeLabelModal })));
 import { ProductImage } from '../../components/ui/ProductImage';
 import { StockBadge } from '../../components/ui/StockBadge';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -412,11 +412,15 @@ export function ProductsPage() {
       />
 
       {/* Barcode Label Modal */}
-      <BarcodeLabelModal
-        isOpen={!!labelProduct}
-        product={labelProduct}
-        onClose={() => setLabelProduct(null)}
-      />
+      {labelProduct && (
+        <Suspense fallback={null}>
+          <BarcodeLabelModal
+            isOpen={!!labelProduct}
+            product={labelProduct}
+            onClose={() => setLabelProduct(null)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   Package,
@@ -24,8 +24,8 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { ProductImage } from '../../components/ui/ProductImage';
-import { CameraScannerModal } from '../../components/CameraScannerModal';
-import { BarcodeLabelModal } from '../../components/BarcodeLabelModal';
+const CameraScannerModal = lazy(() => import('../../components/CameraScannerModal').then(m => ({ default: m.CameraScannerModal })));
+const BarcodeLabelModal = lazy(() => import('../../components/BarcodeLabelModal').then(m => ({ default: m.BarcodeLabelModal })));
 import { useBarcodeScanner } from '../../hooks/useBarcodeScanner';
 import { NotificationToast } from '../../components/ui/NotificationToast';
 
@@ -1000,6 +1000,7 @@ export function AddProductPage() {
 
       {/* Camera Barcode Scanner Modal */}
       {cameraModalOpen && (
+        <Suspense fallback={null}>
         <CameraScannerModal
           isOpen={cameraModalOpen}
           onClose={() => setCameraModalOpen(false)}
@@ -1008,15 +1009,18 @@ export function AddProductPage() {
             handleBarcodeLookup(code);
           }}
         />
+        </Suspense>
       )}
 
       {/* Barcode Label Modal for Loose Products */}
       {labelModalProduct && (
+        <Suspense fallback={null}>
         <BarcodeLabelModal
           isOpen={Boolean(labelModalProduct)}
           onClose={() => setLabelModalProduct(null)}
           product={labelModalProduct}
         />
+        </Suspense>
       )}
 
       {/* Notification Toast */}

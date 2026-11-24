@@ -187,7 +187,7 @@ export async function lookupBarcode(shopId, barcode) {
   let catalogUnavailable = false;
   if (/^\d{8}$|^\d{12,14}$/.test(cleanBarcode)) try {
     const externalResponse = await axios.get(`${config.openFoodFactsUrl}/${encodeURIComponent(cleanBarcode.replace(/^0+(?=\d{12}$)/, ''))}.json`, {
-      timeout: 5000,
+      timeout: 2500,
       validateStatus: status => (status >= 200 && status < 300) || status === 404,
       headers: {
         'User-Agent': 'RetailPOSSaas/2.0 (contact@retailpos.local)'

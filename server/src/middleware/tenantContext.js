@@ -1,6 +1,7 @@
 import { sendError } from '../utils/response.js';
 import { Membership } from '../models/Membership.js';
 import { Shop } from '../models/Shop.js';
+import { cacheGet, cacheSet } from '../utils/cache.js';
 
 /**
  * Tenant Context Middleware
@@ -23,6 +24,18 @@ export async function tenantContext(req, res, next) {
     // Determine target shopId: from header or default membership
     const requestedShopId = req.headers['x-shop-id'];
 
+    // Brief per-instance cache: membership + shop rarely change and this runs on
+    // every API call, so caching cuts two database round trips per request.
+    const tenantCacheKey = `tenant:${req.user._id}:${requestedShopId || 'default'}`;
+    const cachedTenant = cacheGet(tenantCacheKey);
+    if (cachedTenant) {
+      if (cachedTenant.error) {
+        return sendError(res, cachedTenant.error.message, cachedTenant.error.status, cachedTenant.error.code);
+      }
+      req.tenant = cachedTenant.tenant;
+      return next();
+    }
+
     const query = {
       userId: req.user._id,
       status: 'active'
@@ -33,14 +46,14 @@ export async function tenantContext(req, res, next) {
     }
 
     // Find active membership
-    const membership = await Membership.findOne(query);
+    const membership = await Membership.findOne(query).lean();
 
     if (!membership) {
       return sendError(res, 'No active shop membership found for this user.', 403, 'FORBIDDEN_TENANT_ACCESS');
     }
 
     // Verify Shop itself is active
-    const shop = await Shop.findOne({ shopId: membership.shopId });
+    const shop = await Shop.findOne({ shopId: membership.shopId }).lean();
     if (shop?.status === 'suspended') {
       return sendError(res, 'Your store has been suspended. Please contact the support team.', 403, 'SHOP_SUSPENDED');
     }
@@ -56,6 +69,8 @@ export async function tenantContext(req, res, next) {
       permissions: membership.permissions || [],
       settings: shop.settings
     };
+
+    cacheSet(tenantCacheKey, { tenant: req.tenant }, 60000);
 
     next();
   } catch (err) {

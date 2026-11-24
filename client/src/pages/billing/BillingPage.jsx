@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Suspense, lazy } from 'react';
 import {
   Search,
   Barcode,
@@ -23,10 +23,10 @@ import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { useBarcodeScanner } from '../../hooks/useBarcodeScanner';
-import { CameraScannerModal } from '../../components/CameraScannerModal';
+const CameraScannerModal = lazy(() => import('../../components/CameraScannerModal').then(m => ({ default: m.CameraScannerModal })));
 import { CheckoutModal } from '../../components/CheckoutModal';
 import { ReceiptModal } from '../../components/ReceiptModal';
-import { ProductFormModal } from '../../components/ProductFormModal';
+const ProductFormModal = lazy(() => import('../../components/ProductFormModal').then(m => ({ default: m.ProductFormModal })));
 import { CustomerSelectModal } from '../../components/CustomerSelectModal';
 import { ProductCard } from '../../components/ProductCard';
 import { ProductImage } from '../../components/ui/ProductImage';
@@ -794,11 +794,15 @@ export function BillingPage() {
       )}
 
       {/* Modals */}
-      <CameraScannerModal
-        isOpen={cameraModalOpen}
-        onClose={() => setCameraModalOpen(false)}
-        onScanSuccess={handleBarcodeProcess}
-      />
+      {cameraModalOpen && (
+        <Suspense fallback={null}>
+          <CameraScannerModal
+            isOpen={cameraModalOpen}
+            onClose={() => setCameraModalOpen(false)}
+            onScanSuccess={handleBarcodeProcess}
+          />
+        </Suspense>
+      )}
 
       <CheckoutModal
         isOpen={checkoutModalOpen}
@@ -814,6 +818,8 @@ export function BillingPage() {
         shop={activeShop}
       />
 
+      {productFormModalOpen && (
+      <Suspense fallback={null}>
       <ProductFormModal
         isOpen={productFormModalOpen}
         initialBarcode={unregisteredBarcode}
@@ -828,6 +834,8 @@ export function BillingPage() {
           if (unregisteredBarcode && product?.stockQuantity > 0) addItem(product);
         }}
       />
+      </Suspense>
+      )}
 
       <CustomerSelectModal
         isOpen={customerModalOpen}
