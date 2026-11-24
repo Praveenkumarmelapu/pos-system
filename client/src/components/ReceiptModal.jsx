@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Printer, CheckCircle, MessageCircle, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Printer, CheckCircle, MessageCircle, Copy, Check, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import {
   formatBillWhatsAppMessage,
@@ -7,6 +7,7 @@ import {
   copyToClipboard,
   cleanPhoneNumber
 } from '../utils/whatsapp';
+import { shareBillAsImage } from '../utils/billImage';
 import { WhatsAppIcon } from './ui/WhatsAppIcon';
 
 export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false }) {
@@ -14,6 +15,8 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
   const [copied, setCopied] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [shareSuccess, setShareSuccess] = useState(false);
+  const [shareNote, setShareNote] = useState('');
+  const [sharing, setSharing] = useState(false);
   const [phoneError, setPhoneError] = useState('');
 
   useEffect(() => {
@@ -21,6 +24,8 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
       setWhatsappPhone(sale.customerPhone || '');
       setCopied(false);
       setShareSuccess(false);
+      setShareNote('');
+      setSharing(false);
       setPhoneError('');
       setShowPreview(false);
     }
@@ -43,15 +48,33 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
     }
   };
 
-  const handleShareWhatsApp = () => {
-    if (!whatsappPhone.trim()) {
-      setPhoneError('Please enter a valid mobile number');
-      return;
-    }
+  const handleShareWhatsApp = async () => {
     setPhoneError('');
-    openWhatsAppShare(whatsappPhone, billMessage);
-    setShareSuccess(true);
-    setTimeout(() => setShareSuccess(false), 4000);
+    setSharing(true);
+    try {
+      const result = await shareBillAsImage({
+        sale,
+        shop,
+        phone: whatsappPhone,
+        openWhatsAppShare
+      });
+      if (result.cancelled) return;
+      if (result.method === 'share') {
+        setShareNote(`Bill image ready - pick WhatsApp and the customer to send it.`);
+      } else {
+        setShareNote(`Bill image downloaded - WhatsApp opened, attach the downloaded image there.`);
+      }
+      setShareSuccess(true);
+      setTimeout(() => setShareSuccess(false), 6000);
+    } catch (err) {
+      console.error('Bill image share failed, falling back to text:', err);
+      openWhatsAppShare(whatsappPhone, billMessage);
+      setShareNote('Image share failed on this device - opened WhatsApp with the text bill instead.');
+      setShareSuccess(true);
+      setTimeout(() => setShareSuccess(false), 6000);
+    } finally {
+      setSharing(false);
+    }
   };
 
   return (
@@ -190,8 +213,8 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
                   <WhatsAppIcon className="h-4 w-4" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-slate-900">Share Digital Bill via WhatsApp</h4>
-                  <p className="text-[10px] text-slate-500">Instant paperless receipt delivery</p>
+                  <h4 className="text-xs font-bold text-slate-900">Share Bill on WhatsApp</h4>
+                  <p className="text-[10px] text-slate-500">Sends a proper bill image, not plain text</p>
                 </div>
               </div>
               <button
@@ -211,7 +234,7 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
             {shareSuccess && (
               <div className="p-2 bg-emerald-100 text-emerald-900 rounded-lg text-[11px] font-semibold flex items-center gap-1.5">
                 <Check className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
-                <span>WhatsApp chat opened for #{sale.invoiceNumber}!</span>
+                <span>{shareNote || `Bill shared for #${sale.invoiceNumber}!`}</span>
               </div>
             )}
 
@@ -224,7 +247,7 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
                     setWhatsappPhone(e.target.value);
                     if (phoneError) setPhoneError('');
                   }}
-                  placeholder="Customer WhatsApp # (e.g. 9849012345)"
+                  placeholder="Customer WhatsApp # (optional)"
                   className="w-full px-3 py-1.5 bg-white border border-emerald-300 rounded-xl text-xs font-mono font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
@@ -232,10 +255,11 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
               <button
                 type="button"
                 onClick={handleShareWhatsApp}
-                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm shadow-emerald-600/30 transition-all shrink-0"
+                disabled={sharing}
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm shadow-emerald-600/30 transition-all shrink-0"
               >
-                <WhatsAppIcon className="h-3.5 w-3.5" />
-                <span>Send</span>
+                {sharing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <WhatsAppIcon className="h-3.5 w-3.5" />}
+                <span>{sharing ? 'Making...' : 'Send'}</span>
               </button>
             </div>
 
@@ -264,11 +288,12 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
           <button
             type="button"
             onClick={handleShareWhatsApp}
-            className="p-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-sm shadow-emerald-600/20 transition-all flex items-center justify-center shrink-0"
-            title="Share Digital Bill via WhatsApp"
-            aria-label="Share Digital Bill via WhatsApp"
+            disabled={sharing}
+            className="p-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl shadow-sm shadow-emerald-600/20 transition-all flex items-center justify-center shrink-0"
+            title="Share bill image via WhatsApp"
+            aria-label="Share bill image via WhatsApp"
           >
-            <WhatsAppIcon className="h-4 w-4" />
+            {sharing ? <Loader2 className="h-4 w-4 animate-spin" /> : <WhatsAppIcon className="h-4 w-4" />}
           </button>
 
           <div className="flex items-center gap-2">
