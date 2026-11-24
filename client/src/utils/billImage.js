@@ -266,36 +266,44 @@ export async function downloadBillImage({ sale, shop }) {
 }
 
 export function getBillImageCaption({ sale, shop }) {
-  return `Bill #${sale?.invoiceNumber || ''} - ${shop?.name || 'Retail Store'} - Total ${money(sale?.grandTotal)}. The bill image is saved on this device, please attach it here.`;
+  return `Bill #${sale?.invoiceNumber || ''} - ${shop?.name || 'Retail Store'} - Total ${money(sale?.grandTotal)}. Thank you!`;
+}
+
+/** True when this browser can hand a PNG straight to the share sheet (no file saved). */
+export function canShareBillFile() {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.canShare || !navigator.share) return false;
+    const probe = new File([new Blob(['x'], { type: 'image/png' })], 'bill.png', { type: 'image/png' });
+    return navigator.canShare({ files: [probe] });
+  } catch {
+    return false;
+  }
+}
+
+/** Copy the bill PNG to the clipboard (kept in memory, nothing saved to storage). */
+export async function copyBillImageToClipboard({ sale, shop }) {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') return false;
+  const blob = await generateBillImageBlob({ sale, shop });
+  await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+  return true;
 }
 
 /**
- * Share the bill as an image.
- * - Android Chrome: Web Share API hands the PNG to WhatsApp as a photo.
- * - Fallback: downloads the PNG and opens a WhatsApp chat with a short caption
- *   so the shopkeeper can attach the downloaded image.
- *
- * Returns { method: 'share' | 'download', cancelled?: boolean }.
+ * Share the bill as an image through the share sheet. The PNG lives only in
+ * memory, so nothing is saved to the phone gallery or downloads.
+ * Returns { method: 'share' | 'unsupported', cancelled?: boolean }.
  */
-export async function shareBillAsImage({ sale, shop, phone, openWhatsAppShare }) {
+export async function shareBillAsImage({ sale, shop }) {
   const blob = await generateBillImageBlob({ sale, shop });
-  const fileName = `Bill-${sale.invoiceNumber || 'receipt'}.png`;
-  const caption = `Bill #${sale.invoiceNumber} - ${shop?.name || 'Retail Store'} - Total ${money(sale.grandTotal)}. Thank you!`;
-  const file = new File([blob], fileName, { type: 'image/png' });
-
+  const file = new File([blob], `Bill-${sale.invoiceNumber || 'receipt'}.png`, { type: 'image/png' });
   if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
-      await navigator.share({ files: [file], title: `Bill #${sale.invoiceNumber}`, text: caption });
+      await navigator.share({ files: [file], title: `Bill #${sale.invoiceNumber}`, text: getBillImageCaption({ sale, shop }) });
       return { method: 'share' };
     } catch (err) {
       if (err && err.name === 'AbortError') return { method: 'share', cancelled: true };
-      // fall through to download fallback
+      throw err;
     }
   }
-
-  downloadBlob(blob, fileName);
-  if (openWhatsAppShare) {
-    openWhatsAppShare(phone, `${caption}\n\n(Bill image downloaded - please attach it here)`);
-  }
-  return { method: 'download' };
+  return { method: 'unsupported' };
 }

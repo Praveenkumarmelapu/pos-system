@@ -8,7 +8,7 @@ import {
   copyToClipboard,
   cleanPhoneNumber
 } from '../utils/whatsapp';
-import { downloadBillImage, getBillImageCaption, shareBillAsImage } from '../utils/billImage';
+import { canShareBillFile, copyBillImageToClipboard, getBillImageCaption, shareBillAsImage } from '../utils/billImage';
 import { WhatsAppIcon } from './ui/WhatsAppIcon';
 
 export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false }) {
@@ -49,25 +49,28 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
     }
   };
 
+  const flash = (msg) => {
+    setShareNote(msg);
+    setShareSuccess(true);
+    setTimeout(() => setShareSuccess(false), 7000);
+  };
+
+  // Nothing is saved to the phone: the bill image is shared from memory.
   const handleShareImageOptions = async () => {
     setPhoneError('');
     setSharing(true);
     try {
-      const result = await shareBillAsImage({
-        sale,
-        shop,
-        phone: '',
-        openWhatsAppShare
-      });
+      const result = await shareBillAsImage({ sale, shop });
       if (result.cancelled) return;
-      setShareNote('Bill image ready in the share sheet. Choose WhatsApp and then the customer.');
-      setShareSuccess(true);
-      setTimeout(() => setShareSuccess(false), 6000);
+      if (result.method === 'share') {
+        flash('Bill image sent to the share sheet. Pick WhatsApp, then the customer.');
+      } else {
+        const copied = await copyBillImageToClipboard({ sale, shop });
+        flash(copied ? 'Bill image copied. Open WhatsApp and paste it.' : 'Image sharing is not supported here. Use Copy bill text.');
+      }
     } catch (err) {
       console.error('Bill image share failed:', err);
-      setShareNote('Could not prepare the bill image on this device.');
-      setShareSuccess(true);
-      setTimeout(() => setShareSuccess(false), 6000);
+      flash('Could not prepare the bill image on this device.');
     } finally {
       setSharing(false);
     }
@@ -75,23 +78,25 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
 
   const handleShareWhatsApp = async () => {
     setPhoneError('');
-    if (!cleanedPhone) {
-      setPhoneError('Enter a customer WhatsApp number to open their chat directly. Use Share image options for the contact picker.');
+    // Phones that can share files: send the image straight to WhatsApp, no file saved.
+    if (canShareBillFile()) {
+      await handleShareImageOptions();
       return;
     }
+    if (!cleanedPhone) {
+      setPhoneError('Enter a customer WhatsApp number to open their chat.');
+      return;
+    }
+    // Fallback (e.g. desktop): open the customer chat, image goes via clipboard (not saved).
     setSharing(true);
     const whatsappUrl = getWhatsAppShareUrl(cleanedPhone, getBillImageCaption({ sale, shop }));
     window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
     try {
-      await downloadBillImage({ sale, shop });
-      setShareNote('Customer chat opened. Attach the downloaded bill image, then tap Send.');
-      setShareSuccess(true);
-      setTimeout(() => setShareSuccess(false), 6000);
+      const copied = await copyBillImageToClipboard({ sale, shop });
+      flash(copied ? 'Customer chat opened. Paste the bill image (copied), then tap Send.' : 'Customer chat opened with the bill text.');
     } catch (err) {
-      console.error('Bill image download failed:', err);
-      setShareNote('Customer chat opened with the bill text. The image could not be prepared.');
-      setShareSuccess(true);
-      setTimeout(() => setShareSuccess(false), 6000);
+      console.error('Bill image copy failed:', err);
+      flash('Customer chat opened with the bill text.');
     } finally {
       setSharing(false);
     }
@@ -298,7 +303,7 @@ export function ReceiptModal({ isOpen, onClose, sale, shop, isReprint = false })
               disabled={sharing}
               className="text-[10px] text-emerald-800 underline underline-offset-2 font-semibold disabled:opacity-60"
             >
-              Share image options (choose WhatsApp/contact)
+              Share image (choose WhatsApp contact)
             </button>
 
             {/* Toggle WhatsApp message preview */}
